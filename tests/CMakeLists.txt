@@ -1,0 +1,1 @@
+ADD_TEST( check_data ${CMAKE_CURRENT_SOURCE_DIR}/check_data ${CMAKE_BINARY_DIR} )

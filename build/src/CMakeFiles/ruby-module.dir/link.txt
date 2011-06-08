@@ -1,0 +1,1 @@
+/usr/bin/gcc  -fPIC -O2 -g  -shared -Wl,-soname,ruby-module.so -o ruby-module.so CMakeFiles/ruby-module.dir/ruby_module.o -L/usr/lib/libruby-1.9.1.so -lopensync -lglib-2.0 -lxml2 -lruby-1.9.1 -Wl,-rpath,/usr/lib/libruby-1.9.1.so: 

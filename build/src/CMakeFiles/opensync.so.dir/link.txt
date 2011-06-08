@@ -1,0 +1,1 @@
+/usr/bin/gcc  -fPIC -O2 -g  -shared -Wl,-soname,opensync.so.so -o opensync.so.so CMakeFiles/opensync.so.dir/opensyncRUBY_wrap.o -L/usr/lib/libruby-1.9.1.so -lopensync -lruby-1.9.1 -lglib-2.0 -lxml2 -Wl,-rpath,/usr/lib/libruby-1.9.1.so 
