@@ -32,7 +32,7 @@ module Opensync
 	    Example1.get_sync_info(_env)
 	    
 	    # OO example
-	    env=Plugin::Env.for(_env)
+	    env=Plugin::Env.from(_env)
 	    RubyFileSync.get_sync_info(env)
 	    true
         end	  
@@ -42,13 +42,13 @@ module Opensync
     # This is not really a format but someone that ruby-module calls to run get_format_info and get_conversion_info
     class MetaFormat      
         def self.get_format_info(_env)
-	    env=Format::Env.for(_env)
+	    env=Format::Env.from(_env)
 	    FileFormat.get_format_info(env)
 	    true
         end
 	
 	def self.get_conversion_info(_env)
-	    env=Format::Env.for(_env)
+	    env=Format::Env.from(_env)
 	    FileConversion.get_format_info(env)
 	    true
 	end
@@ -67,9 +67,9 @@ module Opensync
 		Opensync.osync_plugin_set_longname(_plugin, "Example module using direct osync methods")
 		Opensync.osync_plugin_set_description(_plugin, "This module uses no object oriented logic")	    	    
 		Opensync.osync_plugin_set_data(_plugin, self)	    
-		Opensync.osync_plugin_set_initialize(_plugin, Proc.new{|_plugin,_info| initialize(_plugin,_info)});
-		Opensync.osync_plugin_set_finalize(_plugin, Proc.new{|_plugin,_info| finalize(_plugin,_info) });
-		Opensync.osync_plugin_set_discover(_plugin, Proc.new{|_plugin,_info| discover(_plugin,_info) });	    
+		Opensync.osync_plugin_set_initialize_func(_plugin, Proc.new{|_plugin,_info| initialize(_plugin,_info)});
+		Opensync.osync_plugin_set_finalize_func(_plugin, Proc.new{|_plugin,_info| finalize(_plugin,_info) });
+		Opensync.osync_plugin_set_discover_func(_plugin, Proc.new{|_plugin,_info| discover(_plugin,_info) });	    
 		if not Opensync.osync_plugin_env_register_plugin(_env, _plugin)
 		   raise OSyncExceptionInitialization("Failed to register #{self}")
 		end
@@ -129,47 +129,57 @@ module Opensync
 	    ObjectSpace.undefine_finalizer(obj)	    	    
 	    ObjectSpace.define_finalizer(obj, destructor)    
 	end
-	
+
+	NEW=:new
 	def self.new(*args)
-	    begin
-	      _self = self.alloc(*args)	    
-	      newobj=_for(_self,*args)
-	    rescue
-	      self.unref(_self)
-	      raise $!
-	    end
+	    new_pvt(NEW,*args)
 	end
 	
-	def self.for(_self, *args)	  
-	    newobj=_for(_self, *args)
-	    self.ref(_self)
-	    newobj
+	def self.from(_self)
+	    new_pvt(_self)
 	end
-		
-	def self._for(_self, *args)	    
-	    klass=_self.class
-	    if not @@swig2ruby[klass]
-		raise "#{self} must be associated with #{klass} before using class.represent"
-	    end
-	    if not self==@@swig2ruby[klass] and not self.ancestors.include?(@@swig2ruby[klass])
-		raise "#{klass} is associated with #{@@swig2ruby[klass]} and not #{self}"
-	    end	    
-	    self.ruby_init(_self) if self.need_ruby_init?
-	    newobj=self.new_pvt(_self, *args)
-	    self.cleanup_on_GC(newobj, _self)
-	    newobj
-	end
-	private_class_method :_for
-	
+			
 	attr_reader :_self
 	#
+	# TODO: update this doc
 	# Initialize an object in Ruby World. _self represents the SWIK object.
 	# If _self is nil, a new object is allocated. Also, it sets a trigger
 	# to call unref on _self when it is Garbage collected
 	#
-	def initialize(_self)	    
-	    @_self=_self
+	def initialize(_self, *args)
+	    case _self
+	    when NEW
+		@_self = self.class.alloc(*args)		
+		self.class.cleanup_on_GC(self,@_self)
+	    else
+		@_self=_self
+		self.class.ref(@_self)
+		self.class.cleanup_on_GC(self,@_self)		
+	    end
+	    
+	    klass=@_self.class
+	    if not @@swig2ruby[klass]
+		raise "#{self} must be associated with #{klass} before using class.represent"
+	    end
+	    if not self.class==@@swig2ruby[klass] and not self.class.ancestors.include?(@@swig2ruby[klass])
+		raise "#{klass} is associated with #{@@swig2ruby[klass]} and not #{self.class}"
+	    end	    
+	    self.class.ruby_init(@_self) if self.class.need_ruby_init?
+	    
+	    case _self
+	    when NEW
+		initialize_new(*args)
+	    else
+		initialize_from
+	    end
 	end
+	
+	def initialize_from
+	end
+
+	def initialize_new
+	end
+	private :initialize_from, :initialize_new	
 	
 	@@unmapped_methods=Set.new(Opensync.methods.select {|method| /^osync_(?!get_version)/ =~ method.to_s })
 	def self.map_methods(regexp)
@@ -259,7 +269,7 @@ module Opensync
 		obj.collect {|_obj| self.map_object(_obj) }
 	    else
 		if klass=@@swig2ruby[obj.class]
-		    klass.for(obj)
+		    klass.from(obj)
 		else
 		    obj
 		end	   
@@ -292,13 +302,9 @@ module Opensync
 	attr_reader :info
 	
 	def self.get_sync_info(env)
-	    plugin = self.new	       
+	    plugin = self.new       
 	    env.register_plugin(plugin)
 	end
-
-# 	def initialize(_self)
-# 	    super(_self)	    
-# 	end
 
 	class Env < OSyncObject
 	    represent SWIG::TYPE_p_OSyncPluginEnv
@@ -349,18 +355,6 @@ module Opensync
 	    Opensync.osync_objformat_new(name, objformat)
 	end
 	
-	def initialize(_self, name, objtype)
-	    super(_self)
-	    # XXX Hack!!! Remove when all objformat callbacks gets a OsyncObjformat and a get/set_data
-	    if $global_objformat
-	       raise "Two formats in Ruby are not yet supported"
-	    end
-	    Opensync.set_single_global_objformat(_self)
-	    $global_objformat = _self
-	    
-	    #self.ruby_init    
-	end
-	
 	def self.get_format_info(env)
 	    format = self.new("xxx","ddd")
 	    env.register_objformat(format)
@@ -368,7 +362,7 @@ module Opensync
 	
 	class Sink < OSyncObject
 	    map_methods /^osync_objformat_sink_/
-	    represent SWIG::TYPE_p_OSyncObjFormatSink
+	    represent SWIG::TYPE_p_OSyncObjFormatSink	    
 	end
     end
       
@@ -393,13 +387,12 @@ module Opensync
     
     class ObjectType < OSyncObject
 	class Sink < OSyncObject
-	      map_methods /^osync_objtype_sink_/
-	      represent SWIG::TYPE_p_OSyncObjTypeSink
+	    map_methods /^osync_objtype_sink_/
+	    represent SWIG::TYPE_p_OSyncObjTypeSink
 	      
-# 	      def initialize(_self)
-# 		  super(_self)
-# 		  self.ruby_init
-# 	      end	    
+	    class MainSink < Sink
+		map_methods /^osync_objtype_main_sink/		
+	    end
 	end
     end  
     
@@ -429,7 +422,7 @@ module Opensync
 end
 
 #$plugin=Opensync::GF690
-require "~/prog/opensync/libopensync-plugin-ruby-0.39/example/ruby-file-sync.rb"
+require "~/prog/opensync/libopensync-plugin-ruby-trunk/example/ruby-file-sync.rb"
 #$stderr.puts OpenSync
 
 # TODO: osync_objtype_main_sink_new is mapped where? What is it for? Check docs.

@@ -446,7 +446,7 @@ error:
 
 /* In initialize, we get the config for the plugin. Here we also must register
  * all _possible_ objtype sinks. */
-static void *osync_rubymodule_plugin_initialize ( OSyncPlugin *plugin, OSyncPluginInfo *info, OSyncError **error )
+static void osync_rubymodule_plugin_initialize ( OSyncPlugin *plugin, OSyncPluginInfo *info, OSyncError **error )
 {
     int status;
     OSyncRubyModulePluginData *plugin_data = 0;
@@ -467,20 +467,20 @@ static void *osync_rubymodule_plugin_initialize ( OSyncPlugin *plugin, OSyncPlug
 
     pthread_mutex_unlock ( &ruby_context_lock );
     osync_trace ( TRACE_EXIT, "%s: %p", __func__, plugin_data );
-    return ( void * ) plugin_data;
+    return;
 error:
     pthread_mutex_unlock ( &ruby_context_lock );
     osync_trace ( TRACE_EXIT_ERROR, "%s: %s", __func__, osync_error_print ( error ) );
-    return NULL;
+    return;
 }
 
 // SGST: add some parameters in order to free sink datas
-static void osync_rubymodule_plugin_finalize ( void *data )
+static void osync_rubymodule_plugin_finalize ( OSyncPlugin *plugin)
 {
-    osync_trace ( TRACE_ENTRY, "%s(%p)", __func__, data );
+    osync_trace ( TRACE_ENTRY, "%s(%p)", __func__, plugin );
 
     int status;
-    OSyncRubyModulePluginData *plugin_data = ( OSyncRubyModulePluginData * ) data;
+    OSyncRubyModulePluginData *plugin_data = ( OSyncRubyModulePluginData * )osync_plugin_get_data(plugin);
 
     pthread_mutex_lock ( &ruby_context_lock );
     VALUE args[1];
@@ -501,12 +501,12 @@ static void osync_rubymodule_plugin_finalize ( void *data )
 
 /* Here we actually tell opensync which sinks are available. For this plugin, we
  * just report all objtype as available. Since the resource are configured like this. */
-static osync_bool osync_rubymodule_plugin_discover ( OSyncPluginInfo *info, void *data, OSyncError **error )
+static osync_bool osync_rubymodule_plugin_discover (OSyncPlugin *plugin, OSyncPluginInfo *info, OSyncError **error )
 {
-    OSyncRubyModulePluginData *plugin_data = ( OSyncRubyModulePluginData * ) data;
-    int status;
-
-    osync_trace ( TRACE_ENTRY, "%s(%p, %p, %p)", __func__, data, info, error );
+    osync_trace ( TRACE_ENTRY, "%s(%p, %p, %p)", __func__, plugin, info, error );
+  
+    OSyncRubyModulePluginData *plugin_data = ( OSyncRubyModulePluginData * ) osync_plugin_get_data(plugin);
+    int status;    
 
     pthread_mutex_lock ( &ruby_context_lock );
     VALUE args[2];
@@ -604,17 +604,11 @@ static void free_objformat_data(OSyncRubyModuleObjectFormatData *data)
     free(data);
 }
 
-// XXX: hack to save a single global format. Not very useful as limit the number of formats to one
-static OSyncObjFormat *single_global_objformat = NULL;
-
-static void *osync_rubymodule_objformat_initialize(OSyncError **error)
+static void *osync_rubymodule_objformat_initialize(OSyncObjFormat *format, OSyncError **error)
 {
     int status;
     OSyncRubyModuleObjectFormatData *format_data = 0;
     osync_trace ( TRACE_ENTRY, "%s(%p)", __func__, error );
-
-    // XXX: Hack!
-    OSyncObjFormat *format = single_global_objformat;
 
     pthread_mutex_lock ( &ruby_context_lock );
     format_data = ( OSyncRubyModuleObjectFormatData* ) osync_objformat_get_data ( format );
@@ -637,14 +631,11 @@ error:
     return NULL;
 }
 
-static osync_bool osync_rubymodule_objformat_finalize(void *user_data, OSyncError **error)
+static osync_bool osync_rubymodule_objformat_finalize(OSyncObjFormat *format, OSyncError **error)
 {
     int status;
     OSyncRubyModuleObjectFormatData *format_data = 0;
     osync_trace ( TRACE_ENTRY, "%s(%p)", __func__, error );
-
-    // XXX: Hack!
-    OSyncObjFormat *format = single_global_objformat;
 
     pthread_mutex_lock ( &ruby_context_lock );
 
@@ -672,14 +663,11 @@ error:
 }
 
 // TODO
-static OSyncConvCmpResult osync_rubymodule_objformat_compare(const char *leftdata, unsigned int leftsize, const char *rightdata, unsigned int rightsize, void *user_data, OSyncError **error)
+static OSyncConvCmpResult osync_rubymodule_objformat_compare(OSyncObjFormat *format, const char *leftdata, unsigned int leftsize, const char *rightdata, unsigned int rightsize, void *user_data, OSyncError **error)
 {
     int status;
     OSyncRubyModuleObjectFormatData *format_data = 0;
     osync_trace ( TRACE_ENTRY, "%s(%p)", __func__, error );
-
-    // XXX: Hack!
-    OSyncObjFormat *format = single_global_objformat;
 
     pthread_mutex_lock ( &ruby_context_lock );
 
@@ -704,14 +692,11 @@ error:
 }
 
 // TODO
-static char *osync_rubymodule_objformat_print(const char *data, unsigned int size, void *user_data, OSyncError **error)
+static char *osync_rubymodule_objformat_print(OSyncObjFormat *format, const char *data, unsigned int size, void *user_data, OSyncError **error)
 {
     int status;
     OSyncRubyModuleObjectFormatData *format_data = 0;
     osync_trace ( TRACE_ENTRY, "%s(%p)", __func__, error );
-
-    // XXX: Hack!
-    OSyncObjFormat *format = single_global_objformat;
 
     pthread_mutex_lock ( &ruby_context_lock );
 
@@ -736,14 +721,11 @@ error:
 }
 
 // TODO
-static time_t osync_rubymodule_objformat_revision(const char *data, unsigned int size, void *user_data, OSyncError **error)
+static time_t osync_rubymodule_objformat_revision(OSyncObjFormat *format, const char *data, unsigned int size, void *user_data, OSyncError **error)
 {
     int status;
     OSyncRubyModuleObjectFormatData *format_data = 0;
     osync_trace ( TRACE_ENTRY, "%s(%p)", __func__, error );
-
-    // XXX: Hack!
-    OSyncObjFormat *format = single_global_objformat;
 
     pthread_mutex_lock ( &ruby_context_lock );
 
@@ -768,14 +750,11 @@ error:
 }
 
 // TODO
-static osync_bool osync_rubymodule_objformat_destroy(char *data, unsigned int size, void *user_data, OSyncError **error)
+static osync_bool osync_rubymodule_objformat_destroy(OSyncObjFormat *format, char *data, unsigned int size, void *user_data, OSyncError **error)
 {
     int status;
     OSyncRubyModuleObjectFormatData *format_data = 0;
     osync_trace ( TRACE_ENTRY, "%s(%p)", __func__, error );
-
-    // XXX: Hack!
-    OSyncObjFormat *format = single_global_objformat;
 
     pthread_mutex_lock ( &ruby_context_lock );
 
@@ -803,14 +782,11 @@ error:
 }
 
 // TODO
-static osync_bool osync_rubymodule_objformat_copy(const char *input, unsigned int inpsize, char **output, unsigned int *outpsize, void *user_data, OSyncError **error)
+static osync_bool osync_rubymodule_objformat_copy(OSyncObjFormat *format, const char *input, unsigned int inpsize, char **output, unsigned int *outpsize, void *user_data, OSyncError **error)
 {
     int status;
     OSyncRubyModuleObjectFormatData *format_data = 0;
     osync_trace ( TRACE_ENTRY, "%s(%p)", __func__, error );
-
-    // XXX: Hack!
-    OSyncObjFormat *format = single_global_objformat;
 
     pthread_mutex_lock ( &ruby_context_lock );
 
@@ -838,14 +814,11 @@ error:
 }
 
 // TODO
-static osync_bool osync_rubymodule_objformat_duplicate(const char *uid, const char *input, unsigned int insize, char **newuid, char **output, unsigned int *outsize, osync_bool *dirty, void *user_data, OSyncError **error)
+static osync_bool osync_rubymodule_objformat_duplicate(OSyncObjFormat *format, const char *uid, const char *input, unsigned int insize, char **newuid, char **output, unsigned int *outsize, osync_bool *dirty, void *user_data, OSyncError **error)
 {
     int status;
     OSyncRubyModuleObjectFormatData *format_data = 0;
     osync_trace ( TRACE_ENTRY, "%s(%p)", __func__, error );
-
-    // XXX: Hack!
-    OSyncObjFormat *format = single_global_objformat;
 
     pthread_mutex_lock ( &ruby_context_lock );
 
@@ -873,14 +846,11 @@ error:
 }
 
 // TODO
-static osync_bool osync_rubymodule_objformat_create(char **data, unsigned int *size, void *user_data, OSyncError **error)
+static osync_bool osync_rubymodule_objformat_create(OSyncObjFormat *format, char **data, unsigned int *size, void *user_data, OSyncError **error)
 {
     int status;
     OSyncRubyModuleObjectFormatData *format_data = 0;
     osync_trace ( TRACE_ENTRY, "%s(%p)", __func__, error );
-
-    // XXX: Hack!
-    OSyncObjFormat *format = single_global_objformat;
 
     pthread_mutex_lock ( &ruby_context_lock );
 
@@ -908,14 +878,11 @@ error:
 }
 
 // TODO
-static osync_bool osync_rubymodule_objformat_marshal(const char *input, unsigned int inpsize, OSyncMarshal *marshal, void *user_data, OSyncError **error)
+static osync_bool osync_rubymodule_objformat_marshal(OSyncObjFormat *format, const char *input, unsigned int inpsize, OSyncMarshal *marshal, void *user_data, OSyncError **error)
 {
     int status;
     OSyncRubyModuleObjectFormatData *format_data = 0;
     osync_trace ( TRACE_ENTRY, "%s(%p)", __func__, error );
-
-    // XXX: Hack!
-    OSyncObjFormat *format = single_global_objformat;
 
     pthread_mutex_lock ( &ruby_context_lock );
 
@@ -943,14 +910,11 @@ error:
 }
 
 // TODO
-static osync_bool osync_rubymodule_objformat_demarshal(OSyncMarshal *marshal, char **output, unsigned int *outpsize, void *user_data, OSyncError **error)
+static osync_bool osync_rubymodule_objformat_demarshal(OSyncObjFormat *format, OSyncMarshal *marshal, char **output, unsigned int *outpsize, void *user_data, OSyncError **error)
 {
     int status;
     OSyncRubyModuleObjectFormatData *format_data = 0;
     osync_trace ( TRACE_ENTRY, "%s(%p)", __func__, error );
-
-    // XXX: Hack!
-    OSyncObjFormat *format = single_global_objformat;
 
     pthread_mutex_lock ( &ruby_context_lock );
 
@@ -978,17 +942,13 @@ error:
 }
 
 // TODO
-static osync_bool osync_rubymodule_objformat_validate(const char *data, unsigned int size, void *user_data, OSyncError **error)
+static osync_bool osync_rubymodule_objformat_validate(OSyncObjFormat *format, const char *data, unsigned int size, void *user_data, OSyncError **error)
 {
     int status;
     OSyncRubyModuleObjectFormatData *format_data = 0;
     osync_trace ( TRACE_ENTRY, "%s(%p)", __func__, error );
 
-
     pthread_mutex_lock ( &ruby_context_lock );
-
-    // XXX: Hack!
-    OSyncObjFormat *format = single_global_objformat;
 
     format_data = ( OSyncRubyModuleObjectFormatData* ) osync_objformat_get_data ( format );
     VALUE args[1];
@@ -1038,7 +998,8 @@ osync_bool get_sync_info ( OSyncPluginEnv *env, OSyncError **error )
         goto error;
     }
     if ( plugin_class == Qnil ) {
-        osync_error_set ( error, OSYNC_ERROR_GENERIC, "Class %s not found!\n%s", RUBY_PLUGIN_CLASS );
+        osync_error_set ( error, OSYNC_ERROR_GENERIC, "Class %s not found!\n%s", RUBY_PLUGIN_CLASS,
+                          osync_rubymodule_error_bt ( __FILE__, __func__,__LINE__ ) );
         goto error;
     }
 
@@ -1086,7 +1047,8 @@ osync_bool get_format_info ( OSyncFormatEnv *env, OSyncError **error )
         goto error;
     }
     if ( plugin_class == Qnil ) {
-        osync_error_set ( error, OSYNC_ERROR_GENERIC, "Class %s not found!\n%s", RUBY_FORMAT_CLASS );
+        osync_error_set ( error, OSYNC_ERROR_GENERIC, "Class %s not found!\n%s", RUBY_FORMAT_CLASS,
+                          osync_rubymodule_error_bt ( __FILE__, __func__,__LINE__ ) );
         goto error;
     }
 
@@ -1275,7 +1237,7 @@ fail:
 }
 
 VALUE
-rb_osync_plugin_set_initialize ( int argc, VALUE *argv, VALUE self )
+rb_osync_plugin_set_initialize_func ( int argc, VALUE *argv, VALUE self )
 {
     OSyncPlugin *arg1 = ( OSyncPlugin * ) 0 ;
     void *argp1 = 0 ;
@@ -1301,7 +1263,7 @@ fail:
 }
 
 VALUE
-rb_osync_plugin_set_finalize ( int argc, VALUE *argv, VALUE self )
+rb_osync_plugin_set_finalize_func ( int argc, VALUE *argv, VALUE self )
 {
     OSyncPlugin *arg1 = ( OSyncPlugin * ) 0 ;
     void *argp1 = 0 ;
@@ -1327,7 +1289,7 @@ fail:
 }
 
 VALUE
-rb_osync_plugin_set_discover ( int argc, VALUE *argv, VALUE self )
+rb_osync_plugin_set_discover_func ( int argc, VALUE *argv, VALUE self )
 {
     OSyncPlugin *arg1 = ( OSyncPlugin * ) 0 ;
     void *argp1 = 0 ;
@@ -1346,7 +1308,7 @@ rb_osync_plugin_set_discover ( int argc, VALUE *argv, VALUE self )
     OSyncRubyModulePluginData *data = osync_plugin_get_data ( arg1 );
     data->discover_fn = argv[1];
 
-    osync_plugin_set_discover ( arg1,osync_rubymodule_plugin_discover );
+    osync_plugin_set_discover_func ( arg1,osync_rubymodule_plugin_discover );
     return Qnil;
 fail:
     return Qnil;
@@ -2093,30 +2055,6 @@ fail:
     return Qnil;
 }
 
-// XXX Hack!!! Remove when all objformat callbacks gets a OsyncObjformat and a get/set_data
-VALUE
-rb_osync_rubymodule_set_single_global_objformat ( int argc, VALUE *argv, VALUE self )
-{
-    OSyncObjFormat *arg1 = ( OSyncObjFormat * ) 0 ;
-    void *argp1 = 0 ;
-    int res1 = 0 ;
-
-    if ( ( argc < 1 ) || ( argc > 1 ) ) {
-        rb_raise ( rb_eArgError, "wrong # of arguments(%d for 1)",argc );
-        SWIG_fail;
-    }
-    res1 = SWIG_ConvertPtr ( argv[0], &argp1,SWIGTYPE_p_OSyncObjFormat, 0 |  0 );
-    if ( !SWIG_IsOK ( res1 ) ) {
-        SWIG_exception_fail ( SWIG_ArgError ( res1 ), Ruby_Format_TypeError ( "", "OSyncObjFormat *","set_single_global_objformat", 1, argv[0] ) );
-    }
-    arg1 = ( OSyncObjFormat * ) ( argp1 );
-    single_global_objformat = arg1;
-    return Qnil;
-fail:
-    return Qnil;
-}
-
-
 void ruby_initialize()
 {
     if ( ruby_initialized )
@@ -2139,9 +2077,9 @@ void ruby_initialize()
     rb_define_module_function ( mOpensync, "osync_plugin_set_data", rb_osync_plugin_set_data, -1 );
     rb_define_module_function ( mOpensync, "osync_plugin_ruby_init", rb_osync_plugin_ruby_init, -1 );
     rb_define_module_function ( mOpensync, "osync_plugin_ruby_free", rb_osync_plugin_ruby_free, -1 );
-    rb_define_module_function ( mOpensync, "osync_plugin_set_initialize", rb_osync_plugin_set_initialize, -1 );
-    rb_define_module_function ( mOpensync, "osync_plugin_set_finalize", rb_osync_plugin_set_finalize, -1 );
-    rb_define_module_function ( mOpensync, "osync_plugin_set_discover", rb_osync_plugin_set_discover, -1 );
+    rb_define_module_function ( mOpensync, "osync_plugin_set_initialize_func", rb_osync_plugin_set_initialize_func, -1 );
+    rb_define_module_function ( mOpensync, "osync_plugin_set_finalize_func", rb_osync_plugin_set_finalize_func, -1 );
+    rb_define_module_function ( mOpensync, "osync_plugin_set_discover_func", rb_osync_plugin_set_discover_func, -1 );
 
     rb_define_module_function ( mOpensync, "osync_objtype_sink_ruby_init", rb_osync_rubymodule_objtype_sink_ruby_init, -1 );
     rb_define_module_function ( mOpensync, "osync_objtype_sink_ruby_free", rb_osync_rubymodule_objtype_sink_ruby_free, -1 );
@@ -2171,9 +2109,6 @@ void ruby_initialize()
     rb_define_module_function ( mOpensync, "osync_objformat_set_marshal_func", rb_osync_rubymodule_objformat_set_marshal_func, -1);
     rb_define_module_function ( mOpensync, "osync_objformat_set_demarshal_func", rb_osync_rubymodule_objformat_set_demarshal_func, -1);
     rb_define_module_function ( mOpensync, "osync_objformat_set_validate_func", rb_osync_rubymodule_objformat_set_validate_func, -1);
-
-    // XXX: hack to save a single global format. Not very useful as limit the number of formats to one
-    rb_define_module_function ( mOpensync, "set_single_global_objformat" , rb_osync_rubymodule_set_single_global_objformat , -1 );
 }
 
 int get_version ( void )

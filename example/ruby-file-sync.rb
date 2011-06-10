@@ -99,16 +99,14 @@ class RubyFileSync < Opensync::Plugin
 	  end
       end
       
-      def initialize(_self)
-	  super(_self)
-	  
+      def initialize_new
 	  self.name="ruby-file-sync"
 	  self.longname="File Synchronization Plugin"
 	  self.description="Plugin to synchronize files on the local filesystem"
 	  
-	  self.initialize=self.callback {|info| initialize0(info)}	    
-	  self.finalize=self.callback   {|data| finalize(data)}
-	  self.discover=self.callback   {|info, data| discover(info, data)}
+	  self.initialize_func=self.callback {|info| initialize0(info)}	    
+	  self.finalize_func=self.callback   {|data| finalize(data)}
+	  self.discover_func=self.callback   {|info, data| discover(info, data)}
       end
       
       def initialize0(info)	  
@@ -421,8 +419,7 @@ class FileFormat < Opensync::ObjectFormat
 	env.register_objformat(format)
     end
     
-    def initialize(_self, name, objtype)
-	super(_self, name, objtype)
+    def initialize_new(name, objtype)	
 # 	$stderr.puts "Initialize?! #{name}"
 	# TODO: implement these callbacks
 # 	self.compare_func=self.callback 	{|xxx| compare(xxx)}
