@@ -3,3 +3,4 @@
 .kdev4/
 *.kdev4
 configure-stamp
+build/

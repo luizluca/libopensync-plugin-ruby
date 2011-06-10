@@ -1,7 +1,7 @@
 # ======================================================
 # This file is part of the mozilla-sync plugin for OpenSync
 # See http://www.KaarPoSoft.dk/bluezync
-# $Id: FindThunderbirdXpcom.cmake 5617 2009-04-17 22:25:03Z henrik $
+# $Id$
 # ======================================================
 
 # The purpose of this CMake file is to find Thunderbird and Sunbird files and versions.
@@ -42,7 +42,7 @@ ELSE( THUNDERBIRD_XPCOM_FOUND )
 		MESSAGE ( FATAL_ERROR "*** *** Did not find Thunderbird include directory with mozilla-config.h" )
 	ENDIF ( NOT THUNDERBIRD_XPCOM_MAIN_INCLUDE_DIR )
 	FIND_PATH ( NSPR_MAIN_INCLUDE_DIR nspr.h
-		PATH_SUFFIXES nspr nspr4
+		PATH_SUFFIXES nspr nspr4 thunderbird/nspr
 		PATHS
 		/opt/local/include/
 		/sw/include/
@@ -124,6 +124,9 @@ ENDIF ( _THUNDERBIRD_XPCOM_VERSION_OK )
 # Thunderbird 3
 IF ( THUNDERBIRD_VERSION_MAIN STREQUAL "3" )
 	SET ( THUNDERBIRD_XPCOM_LIBRARIES "xpcomglue_s;xpcom" )
+	IF ( WIN32 )
+		SET ( THUNDERBIRD_XPCOM_LIBRARIES "xpcomglue_s;xpcom;nspr4" )
+	ENDIF ( WIN32 )
 ENDIF ( THUNDERBIRD_VERSION_MAIN STREQUAL "3" )
 
 # So, by now we should have the following variables set:

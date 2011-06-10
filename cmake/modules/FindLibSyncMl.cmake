@@ -16,24 +16,35 @@
 
 INCLUDE( FindPkgConfig )
 
-# Take care about libsyncml-1.0.pc settings
+# Take care about libsyncml-x.y.pc settings
 IF ( LibSyncMl_FIND_REQUIRED )
   SET( _pkgconfig_REQUIRED "REQUIRED" )
 ELSE ( LibSyncMl_FIND_REQUIRED )
   SET( _pkgconfig_REQUIRED "" )
 ENDIF ( LibSyncMl_FIND_REQUIRED )
 
+# determine API generation
+
+SET( LIBSYNCML_PC "libsyncml-1.0" )
+PKG_SEARCH_MODULE( LIBSYNCML ${_pkgconfig_REQUIRED} libsyncml-3.0 )
+IF ( LIBSYNCML_FOUND )
+	SET ( LIBSYNCML_FOUND FALSE )
+	SET( LIBSYNCML_PC "libsyncml-3.0" )
+ENDIF ( LIBSYNCML_FOUND )
+
+# check for libsyncml-x.y.pc
+
 IF ( LIBSYNCML_MIN_VERSION )
-	PKG_SEARCH_MODULE( LIBSYNCML ${_pkgconfig_REQUIRED} libsyncml-1.0>=${LIBSYNCML_MIN_VERSION} )
+	PKG_SEARCH_MODULE( LIBSYNCML ${_pkgconfig_REQUIRED} ${LIBSYNCML_PC}>=${LIBSYNCML_MIN_VERSION} )
 ELSE( LIBSYNCML_MIN_VERSION )
-	PKG_SEARCH_MODULE( LIBSYNCML ${_pkgconfig_REQUIRED} libsyncml-1.0 )
+	PKG_SEARCH_MODULE( LIBSYNCML ${_pkgconfig_REQUIRED} ${LIBSYNCML_PC} )
 ENDIF ( LIBSYNCML_MIN_VERSION )
 
 
 # Look for libsyncml include dir and libraries without pkg-config...
 IF ( NOT LIBSYNCML_FOUND AND NOT PKG_CONFIG_FOUND )
 	FIND_PATH( _libsyncml_include_DIR libsyncml/syncml.h 
-			PATH_SUFFIXES libsyncml-1.0 
+			PATH_SUFFIXES ${LIBSYNCML_PC}
 			PATHS
 			/opt/local/include/
 			/sw/include/
