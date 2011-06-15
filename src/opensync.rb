@@ -2,10 +2,12 @@
 
 #
 # WARN: plugin_data is set on sync_get_info
-# TODO: Add C counterpart for Sink methods
-# TODO: Convert the use of error into an simple Exception
+# DONE: Add C counterpart for Sink methods
+# DONE: Convert the use of error into an simple Exception
 # DONE: Convert OSyncList to Array of what?
-#
+# TODO: Cannot use GC to clean objects. Must to it manually. Inc the ref counter in order to avoid GC
+#       - clean sink ruby on plugin destroy
+#         
 
 # http://opensync.org/wiki/glossary
 # http://metaeditor.sourceforge.net/embed/#id2842525
@@ -44,17 +46,18 @@ module Opensync
         def self.get_format_info(_env)
 	    env=Format::Env.from(_env)
 	    FileFormat.get_format_info(env)
+	    PlainFormat.get_format_info(env)
 	    true
         end
 	
 	def self.get_conversion_info(_env)
 	    env=Format::Env.from(_env)
-	    FileConversion.get_format_info(env)
+	    FilePlainConverter.get_conversion_info(env)
 	    true
 	end
     end
     
-    # This is a simple example that uses no object oriented. It just call osync just like in C
+    # This is a simple example that uses no object oriented. It just call osync like in C
     class Example1
         # This is called in order to alloc and create a new plugin
         def self.get_sync_info(_env)
@@ -62,11 +65,10 @@ module Opensync
 	    result=false	    
 	    _plugin = Opensync.osync_plugin_new	    
 	    begin	
-		Opensync.osync_plugin_ruby_init(_plugin)
+		#Opensync.osync_plugin_ruby_init(_plugin)
 		Opensync.osync_plugin_set_name(_plugin, "example1")
 		Opensync.osync_plugin_set_longname(_plugin, "Example module using direct osync methods")
-		Opensync.osync_plugin_set_description(_plugin, "This module uses no object oriented logic")	    	    
-		Opensync.osync_plugin_set_data(_plugin, self)	    
+		Opensync.osync_plugin_set_description(_plugin, "This module uses no object oriented logic")
 		Opensync.osync_plugin_set_initialize_func(_plugin, Proc.new{|_plugin,_info| initialize(_plugin,_info)});
 		Opensync.osync_plugin_set_finalize_func(_plugin, Proc.new{|_plugin,_info| finalize(_plugin,_info) });
 		Opensync.osync_plugin_set_discover_func(_plugin, Proc.new{|_plugin,_info| discover(_plugin,_info) });	    
@@ -94,6 +96,9 @@ module Opensync
 	end
     end        
     
+    
+    # Ruby way of doing it
+    
     class OSyncObject
       	# The self.for creates a ruby object to represent a C data	
 	class << self
@@ -116,14 +121,14 @@ module Opensync
 	    raise "#{self.class} might be implement"
 	end
       
-	def self.need_ruby_init?
-	    class_method_defined?(:ruby_init)
-	end	
+# 	def self.need_ruby_init?
+# 	    class_method_defined?(:ruby_init)
+# 	end	
 	
 	def self.cleanup_on_GC(obj,_self)
 	    destructor=Proc.new do
 		# cleanup C world userdata
-		self.ruby_free(_self) if need_ruby_init?
+		#self.ruby_free(_self) if need_ruby_init?
 		self.unref(_self)
 	    end
 	    ObjectSpace.undefine_finalizer(obj)	    	    
@@ -136,6 +141,7 @@ module Opensync
 	end
 	
 	def self.from(_self)
+	    # Maybe rescue a previous instance
 	    new_pvt(_self)
 	end
 			
@@ -150,7 +156,7 @@ module Opensync
 	    case _self
 	    when NEW
 		@_self = self.class.alloc(*args)		
-		self.class.cleanup_on_GC(self,@_self)
+		self.class.cleanup_on_GC(self,@_self)		
 	    else
 		@_self=_self
 		self.class.ref(@_self)
@@ -163,8 +169,9 @@ module Opensync
 	    end
 	    if not self.class==@@swig2ruby[klass] and not self.class.ancestors.include?(@@swig2ruby[klass])
 		raise "#{klass} is associated with #{@@swig2ruby[klass]} and not #{self.class}"
-	    end	    
-	    self.class.ruby_init(@_self) if self.class.need_ruby_init?
+	    end	    	    
+	    
+	    #self.class.ruby_init(@_self) if self.class.need_ruby_init? and not ruby_initialized?
 	    
 	    case _self
 	    when NEW
@@ -182,6 +189,10 @@ module Opensync
 	private :initialize_from, :initialize_new	
 	
 	@@unmapped_methods=Set.new(Opensync.methods.select {|method| /^osync_(?!get_version)/ =~ method.to_s })
+# 	@@unmapped_methods.delete("osync_rubymodule_get_data")
+# 	@@unmapped_methods.delete("osync_rubymodule_set_data")
+# 	@@unmapped_methods.delete("osync_rubymodule_clean_data")
+	
 	def self.map_methods(regexp)
 	    @@unmapped_methods.
 	      select {|method| regexp =~ method.to_s }.
@@ -199,19 +210,25 @@ module Opensync
 		# new is already used. Name it alloc
 		when "new"
 		    self.class_eval "
-		    def self.alloc
-			Opensync.#{method}
-		    end
-		    "
-		    
-		# class methods
-		when "unref", "ref", "ruby_init", "ruby_free"
-		    self.class_eval "
-		    def self.#{suffix}(*args)
+		    def self.alloc(*args)
+			args=args.collect {|arg| if arg.kind_of? OSyncObject; arg._self; else; arg; end}
 			Opensync.#{method}(*args)
 		    end
 		    "
 		    
+		# class methods
+		when "unref", "ref" #, "ruby_init", "ruby_free"
+		    self.class_eval "
+		    def self.#{suffix}(*args)
+			Opensync.#{method}(*args)
+		    end
+		    "    
+# 		when "is_ruby_initialized"
+# 		    self.class_eval "
+# 		    def self.ruby_initialized?(*args)
+# 			Opensync.#{method}(*args)
+# 		    end
+# 		    "    
 		when "initialize"
 		    self.class_eval "
 		    def osync_initialize(*args)			
@@ -293,6 +310,21 @@ module Opensync
 	      end
 	    end
 	end
+			
+	#
+	# Cleans the ruby stuff saved in C world.
+	# Generally this should be called before the object retires
+	def clean
+	    Opensync.osync_rubymodule_clean_data(@_self)
+	end
+	
+	def [](key)
+	    Opensync.osync_rubymodule_get_data(@_self, key.to_s)
+	end
+	
+	def []=(key, value)
+	    Opensync.osync_rubymodule_set_data(@_self, key.to_s, value)
+	end	  
     end
         
     class Plugin < OSyncObject	
@@ -350,15 +382,6 @@ module Opensync
     class ObjectFormat < OSyncObject
 	map_methods /^osync_objformat_((?!sink))/
 	represent SWIG::TYPE_p_OSyncObjFormat
-
-	def self.alloc(name, objformat)
-	    Opensync.osync_objformat_new(name, objformat)
-	end
-	
-	def self.get_format_info(env)
-	    format = self.new("xxx","ddd")
-	    env.register_objformat(format)
-	end
 	
 	class Sink < OSyncObject
 	    map_methods /^osync_objformat_sink_/
@@ -370,8 +393,7 @@ module Opensync
 	map_methods /^osync_converter_/
 	represent SWIG::TYPE_p_OSyncFormatConverter
 			
-	def self.get_conversion_info(env)
-	    
+	def initialize_new(type, source_format, target_format, convert_func)
 	end
     end
         
@@ -426,4 +448,4 @@ require "~/prog/opensync/libopensync-plugin-ruby-trunk/example/ruby-file-sync.rb
 #$stderr.puts OpenSync
 
 # TODO: osync_objtype_main_sink_new is mapped where? What is it for? Check docs.
-Opensync::OSyncObject.unmapped_methods.to_a.each {|method| warn("Atention! Method #{method} not mapped!") }
+#Opensync::OSyncObject.unmapped_methods.to_a.each {|method| warn("Atention! Method #{method} not mapped!") }

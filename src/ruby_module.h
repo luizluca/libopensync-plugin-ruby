@@ -47,6 +47,7 @@
 #define __func__ "unknown_function"
 #endif
 
+/*
 typedef struct SyncRubyModulePluginData {
 	VALUE initialize_fn;
 	VALUE finalize_fn;
@@ -64,7 +65,7 @@ typedef struct SyncRubyModuleObjectTypeSinkData {
 	VALUE connect_done_fn;
 	VALUE disconnect_fn;
 	/* this should be user_data but I hope user_data will become data in the future ;) */
-	VALUE data;
+/*	VALUE data;
 } OSyncRubyModuleObjectTypeSinkData;
 
 typedef struct SyncRubyModuleObjectFormatData {
@@ -84,6 +85,6 @@ typedef struct SyncRubyModuleObjectFormatData {
 // 	VALUE finalize_fn;
 // 	VALUE discover_fn;	
 	VALUE data;
-} OSyncRubyModuleObjectFormatData;
+} OSyncRubyModuleObjectFormatData;*/
 
 #endif //_RUBY_PLUGIN_H
