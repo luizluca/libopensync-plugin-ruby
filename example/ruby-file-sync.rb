@@ -17,12 +17,12 @@
 #
 #
 # OsyncObject is a superclass of all osync struct relative classes.
-# All osync methods are mapped into OSyncObject subclasses. The class name is 
+# Almost all osync methods are mapped into OSyncObject subclasses. The class name is 
 # derived from the opensync method name. I.E.:
 #
-# osync_plugin_get_name    maps to Opensync::Plugin
-# osync_plugin_env_get_xxx maps to Opensync::Plugin::Env
-# 
+# osync_plugin_*     maps to Opensync::Plugin class and instance methods
+# osync_plugin_env_* maps to Opensync::Plugin::Env class and instance methods
+#
 #
 # Opensync methods are mapped into ruby classes according to these rules: 
 #
@@ -43,13 +43,20 @@
 # When MyClass.new is called, it allocs the C struct (Myclass.alloc) and also sets
 # a trigger to call unref the C structure when GC clean the object reference.
 #
-#   plugin = Opensync::Plugin.new # this allocs a new plugin using osync_plugin_new(&error)
 #
-# A new Ruby Class instance can be obtained from a SWIG object by using the Myclass.for method:
+#   plugin = Opensync::Plugin.new
+#   plugin.name = "example"
 #
-#   env = Opensync::Plugin::Env.for(_env)
+# Is equivalent to C code:
 #
-# Or the class can be defined automaticly using Opensync::OsyncObject.map_object(_xxx)
+#  OSyncPlugin plugin = osync_plugin_new(&error);
+#  osync_plugin_set_name(plugin, "example");
+#
+# A new Ruby Class instance can be obtained from a SWIG object by using the Myclass.from method:
+#
+#   env = Opensync::Plugin::Env.from(_env)
+#
+# Or the class can be selected automaticly using Opensync::OsyncObject.map_object(_xxx)
 #  
 #  env = Opensync::OsyncObject.map_object(_env)
 #
@@ -83,6 +90,10 @@
 #
 #  plugin.discover=callback {|info, data| info.xxx }
 #
+#
+# TRACES
+#
+# rubymodule intercepts calls to methods and send the appropriated osync_trace message
 #
 
 require "pathname"
@@ -148,6 +159,7 @@ class RubyFileSync < Opensync::Plugin
 	    sink.sync_done_func=callback{|*args| sync_done(*args) }
 	    
 	    sink.userdata=dir
+	    raise "userdata nao salvo" if not dir==sink.userdata
 	    sink.enable_state_db(true)
 	    sink.enable_hashtable(true)
 	    
@@ -157,7 +169,7 @@ class RubyFileSync < Opensync::Plugin
 	  return env
       end
       
-      def finalize
+      def finalize(plugin_data)
 	  # Clean the callback references (and let GC clean) TODO: check
 	  data.directories.each {|dir| dir.sink.clean }	  
 	  
@@ -166,7 +178,7 @@ class RubyFileSync < Opensync::Plugin
 	  #self.clean
       end
       
-      def discovery(info)
+      def discovery(info, plugin_data)
 	  self.sinks.each {|sink| sink.avaiable=true}
 	  version = OsyncVersion.new
 	  version.plugin = self.name
@@ -178,19 +190,19 @@ class RubyFileSync < Opensync::Plugin
 	  state_db = sink.state_db
 	  pathmatch = nil
 	  
-	  raise "TODO"
-=begin  
-	if (!osync_sink_state_equal(state_db, "path", dir->path, &pathmatch, &error))
-		goto error;
-	if (!pathmatch)
-		osync_context_report_slowsync(ctx);
-=end
+	  $stderr.puts state_db
 	  
-	if not File.directory?(dir.path)
-	  raise Opensync::OSyncError.new("\"#{dir.path}\" is not a directory")
-	end
+	  pathmatch = state_db.equal("path", dir.path)  
+	  
+	  if not patchmatch
+	    ctx.report_slowsync
+	  end
+	  
+	  if not File.directory?(dir.path)
+	    raise Opensync::OSyncError.new("\"#{dir.path}\" is not a directory")
+	  end
 	
-	context.report_sucess
+	  context.report_sucess
       end      
                   
       def read_func(sink, info, ctx, change, userdata)
@@ -234,27 +246,21 @@ class RubyFileSync < Opensync::Plugin
 	      when Opensync::OSYNC_CHANGE_TYPE_ADDED
 		  if File.exist?(filename)		      
 		      change.uid="#{change.uid}-new"
-		      write (sink, info, ctx, change, userdata);
+		      write(sink, info, ctx, change, userdata)
 		  end
 	      end
 	      
 	      #FIXME add ownership for file-sync
 	      odata = change.data
-	      buffer = odata.data
-	      
-	      
-	      # TODO
-=begin
-	      
-	      if (size != sizeof(OSyncFileFormat)) {
-		      osync_error_set(&error, OSYNC_ERROR_MISCONFIGURATION,
-			      "The plugin file-sync only supports file format. Please re-configure and discover the plugin again.");
-		      goto error;
+	      buffer = odata.data      
+	      file = FileFormatData.from_buf(buffer)
+
+	      # Is my implementation equal?
+	      # ??? osync_file_write (filename, file.data, file.size, file.mode)	   
+	      File.open(filename, "w") {|io|
+		  io.print(file.data)
+	          io.chmod(file.mode)
 	      }
-=end
-	      
-	      file = FileFormatData.from_buffer(buffer)
-	      # TODO osync_file_write (filename, file.data, file.size, file.mode)	   
 	end
 	return TRUE
       end
@@ -299,20 +305,7 @@ class RubyFileSync < Opensync::Plugin
 		file.path = relative_filename;
 		fileformat = formatenv.find_objformat("file")
 		
-		raise "TODO"
-=begin
-		odata = osync_data_new((char *)file, sizeof(OSyncFileFormat), fileformat, &error);
-		if (!odata) {
-			osync_change_unref(change);
-			osync_context_report_osyncwarning(ctx, error);
-			osync_error_unref(&error);
-			g_free(data);
-			g_free(filename);
-			g_free(relative_filename);
-			g_free(file->path);
-			continue;
-		}
-=end
+		odata = Opensync::Data.new(file.to_buf, fileformat)
 		odata.objtype=sink.name
 		change.data=odata
 		ctx.report_change(change)
@@ -383,12 +376,24 @@ class FileFormat < Opensync::ObjectFormat
     class FileFormatData
 	attr_accessor :mode, :userid, :groupid, :last_mod, :path, :data, :size
 	
-	def initialize(string)
-	    
-	end
-	
 	def to_s
 	    "File #{self.path}: size: #{self.size}"
+	end
+		
+	def marshal_dump
+	  [@mode, @userid, @groupid, @last_mod, @path, @data, @size]
+	end
+
+	def marshal_load(array)
+	  (@mode, @userid, @groupid, @last_mod, @path, @data, @size) = array
+	end
+	
+	def to_buf
+	    Marshal.dump(self)
+	end
+	
+	def self.from_buf(string)
+	    Marshal.load(string)
 	end
     end    
     	
@@ -404,16 +409,14 @@ class FileFormat < Opensync::ObjectFormat
 	self.duplicate_func=callback{|format, *args| self._duplicate(*args) }
 	self.print_func=callback{|format, *args| self._print(*args) }
 	self.revision_func=callback{|format, *args| self._revision(*args) }
-	self.marshal_func=callback{|format, *args| self._marshal(*args) }
-	self.demarshal_func=callback{|format, *args| self._demarshal(*args) }
+	self.copy_func=callback{|format, *args| self._copy(*args) }
     end
     
     private 
     
     def _compare(leftdata, rightdata)	
-	# TODO
-      	leftfile = FileFormatData.from_buffer(leftdata);
-	rightfile = FileFormatData.from_buffer(rightdata);
+      	leftfile = FileFormatData.from_buf(leftdata);
+	rightfile = FileFormatData.from_buf(rightdata);
 	
 	return Opensync::OSYNC_CONV_DATA_MISMATCH if not leftfile.path == rightfile.path
 	return Opensync::OSYNC_CONV_DATA_SIMILAR  if not leftfile.size == rightfile.size
@@ -421,27 +424,27 @@ class FileFormat < Opensync::ObjectFormat
 	return Opensync::OSYNC_CONV_DATA_SAME
     end
 
+    # Do I need this?
     def _destroy(data)
-	# TODO
     end
 
-    def _duplicate()
-	# TODO
+    def _duplicate(uid, input)      
+	file=FileFormatData.from_buf(input)
+	file.path="#{copy.path}-dupe"
+	[file.path, file.to_buf, true]
     end
 
-    def _print(data)
-	# TODO
-	FileFormatData.from_buffer(data).to_s
+    def _copy(input)
+	FileFormatData.from_buf(input).dup.to_buf
     end
 
-    def _revision()
+    def _revision(input)
+	FileFormatData.from_buf(input).mtime
     end
-
-    def _marshal()
+    
+    def _print(data)	
+	FileFormatData.from_buf(data).to_s
     end
-
-    def _demarshal()
-    end    
 end
 
 class PlainFormat < Opensync::ObjectFormat
@@ -474,6 +477,20 @@ class PlainFormat < Opensync::ObjectFormat
 end
 
 class FilePlainConverter < Opensync::FormatConverter
+  
+    def convert_file_to_plain(input)
+	FileFormatData.from_buf(input).data.dup
+    end
+    
+    def convert_plain_to_file(input)
+	file=FileFormatData.new
+	# TODO
+	file.path = Opensync::osync_rand_str(rand(100)+1)
+	file.data = input;
+	file.size = input.size;
+	file.to_buf
+    end
+  
     def self.get_conversion_info(env)
 	file = env.find_objformat("file") or
 	    raise "Unable to find file format"

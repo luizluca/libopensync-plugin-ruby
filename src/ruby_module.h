@@ -43,9 +43,9 @@
 #define RUBY_PLUGIN_CLASS "Opensync::MetaPlugin"
 #define RUBY_FORMAT_CLASS "Opensync::MetaFormat"
 
-#ifndef __func__
-#define __func__ "unknown_function"
-#endif
+// #ifndef __func__
+// #define __func__ "unknown_function"
+// #endif
 
 /*
 typedef struct SyncRubyModulePluginData {

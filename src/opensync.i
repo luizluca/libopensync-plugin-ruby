@@ -26,6 +26,13 @@
  $result = ($1==FALSE ? Qfalse : Qtrue); 
 }
 
+%typemap(in) time_t { 
+  $1 = FIX2LONG(rb_funcall($input, rb_intern("to_i"), 0)); 
+}
+%typemap(out) time_t {
+  $result = rb_funcall(rb_cTime, rb_intern("at"), 1, LONG2FIX($1)); 
+}
+
 %typemap(in) (char *data, unsigned int size) {
  $1 = RSTRING_PTR($input);
  $2 = (unsigned int) RSTRING_LEN($input);
@@ -42,6 +49,13 @@
 }
 %typemap(argout) (char **buffer, unsigned int *size) {
   $result = SWIG_FromCharPtrAndSize(temp_buffer$argnum, temp_size$argnum); 
+};
+
+%typemap(in, numinputs=0) (osync_bool *issame) (osync_bool temp_issame) {
+   $1 = &temp_issame;
+}
+%typemap(argout) (osync_bool *issame) {
+  $result = (temp_issame$argnum==FALSE ? Qfalse : Qtrue); 
 };
 
 /* error parameter marked as optional. No need to be supplied*/
@@ -146,3 +160,5 @@ typedef enum {
 %include "opensync/format/opensync_objformat_sink.h"
 %include "opensync/format/opensync_merger.h"
 %include "opensync/data/opensync_data.h"
+%include "opensync/debug/opensync_trace.h"
+%include "opensync/helper/opensync_sink_state_db.h"

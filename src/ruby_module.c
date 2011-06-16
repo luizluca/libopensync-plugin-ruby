@@ -30,6 +30,16 @@
 #include <glib.h>
 #include "opensyncRUBY_wrap.c"
 
+#define RBOOL(value) ((value==Qfalse) || (value==Qnil) ? FALSE : TRUE)
+#define BOOLR(value) (value==FALSE ? Qfalse : Qtrue)
+
+#define IS_BOOL(value)   ((value==Qfalse) || (value==Qtrue))
+/* Check_Type(val, T_STRING) raises exception but I these macros are 
+ * used in not-protected code */
+#define IS_STRING(value) (TYPE(value)==T_STRING)
+#define IS_ARRAY(value)  (TYPE(value)==T_ARRAY)
+#define IS_FIXNUM(value) (FIXNUM_P(value))
+#define IS_TIME(value)   (TYPE(value)==rb_cTime)
 
 RUBY_GLOBAL_SETUP
 
@@ -326,7 +336,7 @@ static void osync_rubymodule_objtype_sink_get_changes ( OSyncObjTypeSink *sink, 
     args[0] = SWIG_NewPointerObj ( SWIG_as_voidptr ( sink ), SWIGTYPE_p_OSyncObjTypeSink, 0 |  0 );
     args[1] = SWIG_NewPointerObj ( SWIG_as_voidptr ( info ), SWIGTYPE_p_OSyncPluginInfo, 0 |  0 );
     args[2] = SWIG_NewPointerObj ( SWIG_as_voidptr ( ctx ), SWIGTYPE_p_OSyncContext, 0 |  0 );
-    args[3] = slow_sync==FALSE? Qfalse : Qtrue;
+    args[3] = BOOLR(slow_sync);
     args[4] = ruby_data;
     /*VALUE result = */
     rb_fcall2_protected ( callback, "call", 5, args, &status );
@@ -491,7 +501,7 @@ static void osync_rubymodule_objtype_sink_connect_done ( OSyncObjTypeSink *sink,
     args[0] = SWIG_NewPointerObj ( SWIG_as_voidptr ( sink ), SWIGTYPE_p_OSyncObjTypeSink, 0 |  0 );
     args[1] = SWIG_NewPointerObj ( SWIG_as_voidptr ( info ), SWIGTYPE_p_OSyncPluginInfo, 0 |  0 );
     args[2] = SWIG_NewPointerObj ( SWIG_as_voidptr ( ctx ), SWIGTYPE_p_OSyncContext, 0 |  0 );
-    args[3] = slow_sync==FALSE? Qfalse : Qtrue;
+    args[3] = BOOLR(slow_sync);
     args[4] = ruby_data;
     /*VALUE result = */
     rb_fcall2_protected ( callback, "call", 5, args, &status );
@@ -547,7 +557,7 @@ error:
 
 /* In initialize, we get the config for the plugin. Here we also must register
  * all _possible_ objtype sinks. */
-static void osync_rubymodule_plugin_initialize ( OSyncPlugin *plugin, OSyncPluginInfo *info, OSyncError **error )
+static void *osync_rubymodule_plugin_initialize ( OSyncPlugin *plugin, OSyncPluginInfo *info, OSyncError **error )
 {
     int status;
     osync_trace ( TRACE_ENTRY, "%s(%p, %p, %p)", __func__, plugin, info, error );
@@ -567,11 +577,7 @@ static void osync_rubymodule_plugin_initialize ( OSyncPlugin *plugin, OSyncPlugi
     
     pthread_mutex_unlock ( &ruby_context_lock );
     osync_trace ( TRACE_EXIT, "%s: %lu", __func__, result);
-    /* return (void*)result; */
-    
-    //fprintf(stderr,"exit OK!\n");
-    
-    return;
+    return (void*)result;
 error:
     pthread_mutex_unlock ( &ruby_context_lock );
     osync_trace ( TRACE_EXIT_ERROR, "%s: %s", __func__, osync_error_print ( error ) );
@@ -579,7 +585,7 @@ error:
 }
 
 // SGST: add some parameters in order to free sink datas
-static void osync_rubymodule_plugin_finalize ( OSyncPlugin *plugin)
+static void osync_rubymodule_plugin_finalize ( OSyncPlugin *plugin, void* plugin_data)
 {
     osync_trace ( TRACE_ENTRY, "%s(%p)", __func__, plugin );
 
@@ -604,7 +610,7 @@ static void osync_rubymodule_plugin_finalize ( OSyncPlugin *plugin)
 
 /* Here we actually tell opensync which sinks are available. For this plugin, we
  * just report all objtype as available. Since the resource are configured like this. */
-static osync_bool osync_rubymodule_plugin_discover (OSyncPlugin *plugin, OSyncPluginInfo *info, OSyncError **error )
+static osync_bool osync_rubymodule_plugin_discover (OSyncPlugin *plugin, OSyncPluginInfo *info, void* plugin_data, OSyncError **error )
 {
     osync_trace ( TRACE_ENTRY, "%s(%p, %p, %p)", __func__, plugin, info, error );
   
@@ -694,7 +700,7 @@ static osync_bool osync_rubymodule_objformat_finalize(OSyncObjFormat *format, OS
                           osync_rubymodule_error_bt ( __FILE__, __func__,__LINE__ ) );
         goto error;
     }
-    if ((result == Qfalse) || (result == Qnil))
+    if (!RBOOL(result))
         goto error;
 
     // Should I need this (and ruby unref)?
@@ -709,7 +715,6 @@ error:
     return FALSE;
 }
 
-// TODO
 static OSyncConvCmpResult osync_rubymodule_objformat_compare(OSyncObjFormat *format, const char *leftdata, unsigned int leftsize, const char *rightdata, unsigned int rightsize, void *user_data, OSyncError **error)
 {
     int status;
@@ -724,23 +729,24 @@ static OSyncConvCmpResult osync_rubymodule_objformat_compare(OSyncObjFormat *for
     args[2] = SWIG_FromCharPtrAndSize(rightdata, rightsize);
     VALUE result = rb_fcall2_protected (callback, "call", 3, args, &status );
     if ( status!=0 ) {
-        osync_error_set ( error, OSYNC_ERROR_INITIALIZATION, "Failed to call objformat initializing function!\n%s",
+        osync_error_set ( error, OSYNC_ERROR_GENERIC, "Failed to call objformat initializing function!\n%s",
                           osync_rubymodule_error_bt ( __FILE__, __func__,__LINE__ ) );
         goto error;
-    }
-
+    }    
+    if (!IS_FIXNUM(result)) {
+	osync_error_set ( error, OSYNC_ERROR_GENERIC, "The result should of compare should be a FixNum!\n");
+        goto error;
+    }  
     pthread_mutex_unlock ( &ruby_context_lock );
-   //TODO osync_trace ( TRACE_EXIT, "%s: %p", __func__, format_data );
-    return 0;
+    osync_trace ( TRACE_EXIT, "%s: %i", __func__, FIX2INT(result) );
+    return FIX2INT(result);
 error:
     pthread_mutex_unlock ( &ruby_context_lock );
     osync_trace ( TRACE_EXIT_ERROR, "%s: %s", __func__, osync_error_print ( error ) );
     return 0;
 }
 
-// TODO
-static char *osync_rubymodule_objformat_print(OSyncObjFormat *format, const char *data, unsigned int size, void *user_data, OSyncError **error)
-{
+static char *osync_rubymodule_objformat_print(OSyncObjFormat *format, const char *data, unsigned int size, void *user_data, OSyncError **error) {
     int status;    
     osync_trace ( TRACE_ENTRY, "%s(%p)", __func__, error );
     VALUE callback = osync_rubymodule_get_data ( format, "print_func");
@@ -756,19 +762,20 @@ static char *osync_rubymodule_objformat_print(OSyncObjFormat *format, const char
                           osync_rubymodule_error_bt ( __FILE__, __func__,__LINE__ ) );
         goto error;
     }
-
+    if (!IS_STRING(result)) {
+	osync_error_set ( error, OSYNC_ERROR_GENERIC, "The result should of print should be a String!\n");
+        goto error;
+    }  
     pthread_mutex_unlock ( &ruby_context_lock );
-    osync_trace ( TRACE_EXIT, "%s: %p", __func__, result );
-    return ( void * ) result;
+    osync_trace ( TRACE_EXIT, "%s: %p", __func__, RSTRING_PTR(result));
+    return RSTRING_PTR(result);
 error:
     pthread_mutex_unlock ( &ruby_context_lock );
     osync_trace ( TRACE_EXIT_ERROR, "%s: %s", __func__, osync_error_print ( error ) );
     return NULL;
 }
 
-// TODO
-static time_t osync_rubymodule_objformat_revision(OSyncObjFormat *format, const char *data, unsigned int size, void *user_data, OSyncError **error)
-{
+static time_t osync_rubymodule_objformat_revision(OSyncObjFormat *format, const char *data, unsigned int size, void *user_data, OSyncError **error) {
     int status;
     osync_trace ( TRACE_ENTRY, "%s(%p)", __func__, error );
     VALUE callback = osync_rubymodule_get_data ( format, "revision_func");
@@ -780,23 +787,33 @@ static time_t osync_rubymodule_objformat_revision(OSyncObjFormat *format, const 
     args[1] = SWIG_FromCharPtrAndSize(data, size);
     VALUE result = rb_fcall2_protected ( callback, "call", 2, args, &status );
     if ( status!=0 ) {
-        osync_error_set ( error, OSYNC_ERROR_INITIALIZATION, "Failed to call objformat initializing function!\n%s",
+        osync_error_set ( error, OSYNC_ERROR_GENERIC, "Failed to call objformat initializing function!\n%s",
                           osync_rubymodule_error_bt ( __FILE__, __func__,__LINE__ ) );
         goto error;
     }
     
+    if (!IS_TIME(result)) {
+	osync_error_set ( error, OSYNC_ERROR_GENERIC, "The result should of revision should be a Time!\n");
+        goto error;
+    }
+    
+    result = rb_fcall2_protected (result, "to_i", 0, NULL, &status );
+    if ( (status!=0) || !IS_FIXNUM(result) ) {
+        osync_error_set ( error, OSYNC_ERROR_GENERIC, "Failed to convert time to a number!\n%s",
+                          osync_rubymodule_error_bt ( __FILE__, __func__,__LINE__ ) );
+        goto error;
+    }    
+    
     pthread_mutex_unlock ( &ruby_context_lock );
-    osync_trace ( TRACE_EXIT, "%s: %p", __func__, callback );
-    return TRUE;
+    osync_trace ( TRACE_EXIT, "%s: %li", __func__,FIX2LONG(result));
+    return FIX2LONG(result);
 error:
     pthread_mutex_unlock ( &ruby_context_lock );
     osync_trace ( TRACE_EXIT_ERROR, "%s: %s", __func__, osync_error_print ( error ) );
-    return FALSE;
+    return 0;
 }
 
-// TODO
-static osync_bool osync_rubymodule_objformat_destroy(OSyncObjFormat *format, char *data, unsigned int size, void *user_data, OSyncError **error)
-{
+static osync_bool osync_rubymodule_objformat_destroy(OSyncObjFormat *format, char *data, unsigned int size, void *user_data, OSyncError **error) {
     int status;
     osync_trace ( TRACE_ENTRY, "%s(%p)", __func__, error );
     VALUE callback = osync_rubymodule_get_data ( format, "destroy_func");
@@ -812,11 +829,11 @@ static osync_bool osync_rubymodule_objformat_destroy(OSyncObjFormat *format, cha
                           osync_rubymodule_error_bt ( __FILE__, __func__,__LINE__ ) );
         goto error;
     }
-    if ((result == Qfalse) || (result == Qnil))
+    if (!RBOOL(result))
         goto error;
 
     pthread_mutex_unlock ( &ruby_context_lock );
-    osync_trace ( TRACE_EXIT, "%s: %p", __func__, result );
+    osync_trace ( TRACE_EXIT, "%s: true", __func__);
     return TRUE;
 error:
     pthread_mutex_unlock ( &ruby_context_lock );
@@ -824,28 +841,30 @@ error:
     return FALSE;
 }
 
-// TODO
-static osync_bool osync_rubymodule_objformat_copy(OSyncObjFormat *format, const char *input, unsigned int inpsize, char **output, unsigned int *outpsize, void *user_data, OSyncError **error)
-{
+static osync_bool osync_rubymodule_objformat_copy(OSyncObjFormat *format, const char *input, unsigned int insize, char **output, unsigned int *outpsize, void *user_data, OSyncError **error) {
     int status;
     osync_trace ( TRACE_ENTRY, "%s(%p)", __func__, error );
     VALUE callback = osync_rubymodule_get_data ( format, "copy_func");
     
     pthread_mutex_lock ( &ruby_context_lock );
-    
-    VALUE args[1];
+    VALUE args[2];    
     args[0] = SWIG_NewPointerObj ( SWIG_as_voidptr ( format ), SWIGTYPE_p_OSyncObjFormat, 0 |  0 );
-    VALUE result = rb_fcall2_protected (callback, "call", 1, args, &status );
+    args[1] = SWIG_FromCharPtrAndSize(input, insize);
+    VALUE result = rb_fcall2_protected ( callback, "call", 2, args, &status );
     if ( status!=0 ) {
         osync_error_set ( error, OSYNC_ERROR_INITIALIZATION, "Failed to call objformat initializing function!\n%s",
                           osync_rubymodule_error_bt ( __FILE__, __func__,__LINE__ ) );
         goto error;
     }
-    if ((result == Qfalse) || (result == Qnil))
+    if (!IS_STRING(result)) {        
+	osync_error_set ( error, OSYNC_ERROR_GENERIC, "The result of copy should be a String!\n");
         goto error;
+    }  
+        
+    *output = RSTRING_PTR(result);
 
     pthread_mutex_unlock ( &ruby_context_lock );
-    osync_trace ( TRACE_EXIT, "%s: %p", __func__, result );
+    osync_trace ( TRACE_EXIT, "%s: true", __func__);
     return TRUE;
 error:
     pthread_mutex_unlock ( &ruby_context_lock );
@@ -853,28 +872,38 @@ error:
     return FALSE;
 }
 
-// TODO
-static osync_bool osync_rubymodule_objformat_duplicate(OSyncObjFormat *format, const char *uid, const char *input, unsigned int insize, char **newuid, char **output, unsigned int *outsize, osync_bool *dirty, void *user_data, OSyncError **error)
-{
+static osync_bool osync_rubymodule_objformat_duplicate(OSyncObjFormat *format, const char *uid, const char *input, unsigned int insize, char **newuid, char **output, unsigned int *outsize, osync_bool *dirty, void *user_data, OSyncError **error) {
     int status;
     osync_trace ( TRACE_ENTRY, "%s(%p)", __func__, error );
 
     VALUE callback = osync_rubymodule_get_data ( format, "duplicate_func");
  
     pthread_mutex_lock ( &ruby_context_lock );
-    VALUE args[1];
+    VALUE args[3];    
     args[0] = SWIG_NewPointerObj ( SWIG_as_voidptr ( format ), SWIGTYPE_p_OSyncObjFormat, 0 |  0 );
-    VALUE result = rb_fcall2_protected ( callback, "call", 1, args, &status );
+    args[1] = SWIG_FromCharPtrAndSize(uid, strlen(uid));
+    args[2] = SWIG_FromCharPtrAndSize(input, insize);
+    VALUE result = rb_fcall2_protected ( callback, "call", 3, args, &status );
     if ( status!=0 ) {
         osync_error_set ( error, OSYNC_ERROR_INITIALIZATION, "Failed to call objformat initializing function!\n%s",
                           osync_rubymodule_error_bt ( __FILE__, __func__,__LINE__ ) );
         goto error;
     }
-    if ((result == Qfalse) || (result == Qnil))
+    if (!IS_ARRAY(result) || (RARRAY_LEN(result) != 3) ||
+	!IS_STRING(rb_ary_entry(result, 0)) ||
+	!IS_STRING(rb_ary_entry(result, 1)) ||
+	!IS_BOOL(rb_ary_entry(result, 2))
+    ) {        
+	osync_error_set ( error, OSYNC_ERROR_GENERIC, "The result should of print should be an Array with [newuid:string, output:string, dirty:bool] !\n");
         goto error;
+    }  
+    
+    *newuid = RSTRING_PTR(rb_ary_entry(result, 0));
+    *output = RSTRING_PTR(rb_ary_entry(result, 1));
+    *dirty  = RBOOL(rb_ary_entry(result, 2));
 
     pthread_mutex_unlock ( &ruby_context_lock );
-    osync_trace ( TRACE_EXIT, "%s: %p", __func__, result );
+    osync_trace ( TRACE_EXIT, "%s: true", __func__);
     return TRUE;
 error:
     pthread_mutex_unlock ( &ruby_context_lock );
@@ -899,11 +928,11 @@ static osync_bool osync_rubymodule_objformat_create(OSyncObjFormat *format, char
                           osync_rubymodule_error_bt ( __FILE__, __func__,__LINE__ ) );
         goto error;
     }
-    if ((result == Qfalse) || (result == Qnil))
+    if (!RBOOL(result))
         goto error;
     
     pthread_mutex_unlock ( &ruby_context_lock );
-    osync_trace ( TRACE_EXIT, "%s: %p", __func__, result );
+    osync_trace ( TRACE_EXIT, "%s: true", __func__);
     return TRUE;
 error:
     pthread_mutex_unlock ( &ruby_context_lock );
@@ -928,11 +957,11 @@ static osync_bool osync_rubymodule_objformat_marshal(OSyncObjFormat *format, con
                           osync_rubymodule_error_bt ( __FILE__, __func__,__LINE__ ) );
         goto error;
     }
-    if ((result == Qfalse) || (result == Qnil))
+    if (!RBOOL(result))
         goto error;
     
     pthread_mutex_unlock ( &ruby_context_lock );
-    osync_trace ( TRACE_EXIT, "%s: %p", __func__, result );
+    osync_trace ( TRACE_EXIT, "%s: true", __func__);
     return TRUE;
 error:
     pthread_mutex_unlock ( &ruby_context_lock );
@@ -957,11 +986,11 @@ static osync_bool osync_rubymodule_objformat_demarshal(OSyncObjFormat *format, O
                           osync_rubymodule_error_bt ( __FILE__, __func__,__LINE__ ) );
         goto error;
     }
-    if ((result == Qfalse) || (result == Qnil))
+    if (!RBOOL(result))
         goto error;
 
     pthread_mutex_unlock ( &ruby_context_lock );
-    osync_trace ( TRACE_EXIT, "%s: %p", __func__, result );
+    osync_trace ( TRACE_EXIT, "%s: true", __func__);
     return TRUE;
 error:
     pthread_mutex_unlock ( &ruby_context_lock );
@@ -986,11 +1015,11 @@ static osync_bool osync_rubymodule_objformat_validate(OSyncObjFormat *format, co
                           osync_rubymodule_error_bt ( __FILE__, __func__,__LINE__ ) );
         goto error;
     }
-    if ((result == Qfalse) || (result == Qnil))
+    if (!RBOOL(result))
         goto error;
 
     pthread_mutex_unlock ( &ruby_context_lock );
-    osync_trace ( TRACE_EXIT, "%s: %p", __func__, result );
+    osync_trace ( TRACE_EXIT, "%s: true", __func__);
     return TRUE;
 error:
     pthread_mutex_unlock ( &ruby_context_lock );
@@ -1037,11 +1066,12 @@ osync_bool get_sync_info ( OSyncPluginEnv *env, OSyncError **error )
         goto error;
     }
 
-    if ((result == Qfalse) || (result == Qnil)) {
+    if (!RBOOL(result)) {
         goto error;
     }
 
     pthread_mutex_unlock ( &ruby_context_lock );
+    osync_trace ( TRACE_EXIT, "%s: true", __func__);
     return TRUE;
 error:
     osync_trace ( TRACE_ERROR, "Unable to register: %s", osync_error_print ( error ) );
@@ -1086,11 +1116,12 @@ osync_bool get_format_info ( OSyncFormatEnv *env, OSyncError **error )
         goto error;
     }
 
-    if ((result == Qfalse) || (result == Qnil)) {
+    if (!RBOOL(result)) {
         goto error;
     }
 
     pthread_mutex_unlock ( &ruby_context_lock );
+    osync_trace ( TRACE_EXIT, "%s: true", __func__);
     return TRUE;
 error:
     osync_trace ( TRACE_ERROR, "Unable to register: %s", osync_error_print ( error ) );
@@ -1135,13 +1166,14 @@ osync_bool get_conversion_info ( OSyncFormatEnv *env, OSyncError **error )
         goto error;
     }
 
-    if ((result == Qfalse) || (result == Qnil)) {
+    if (!RBOOL(result)) {
 	osync_error_set ( error, OSYNC_ERROR_GENERIC, "%s.get_conversion_info returned false or nil (which means problems)!\n%s", RUBY_FORMAT_CLASS,
                           osync_rubymodule_error_bt ( __FILE__, __func__,__LINE__ ) );
         goto error;
     }
 
     pthread_mutex_unlock ( &ruby_context_lock );
+    osync_trace ( TRACE_EXIT, "%s: true", __func__);
     return TRUE;
 error:
     osync_trace ( TRACE_ERROR, "Unable to register: %s", osync_error_print ( error ) );
@@ -1874,7 +1906,7 @@ static osync_bool osync_rubymodule_converter_convert(char *input, unsigned int i
                           osync_rubymodule_error_bt ( __FILE__, __func__,__LINE__ ) );
         goto error;
     }
-    if ((result == Qfalse) || (result == Qnil))
+    if (!RBOOL(result))
         goto error;
 
     pthread_mutex_unlock ( &ruby_context_lock );
@@ -2172,3 +2204,4 @@ objformat?
  */
 
 // osync_caps_converter_new and osync_converter_new ????
+// file-sync does not "osync_trace ( TRACE_EXIT, "%s: true", __func__);"

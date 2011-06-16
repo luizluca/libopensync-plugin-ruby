@@ -12,7 +12,7 @@
 # http://opensync.org/wiki/glossary
 # http://metaeditor.sourceforge.net/embed/#id2842525
 # http://www.ruby-doc.org/docs/ProgrammingRuby/html/ext_ruby.html
-# 
+# http://people.apache.org/~rooneg/talks/ruby-extensions/ruby-extensions.html
 
 # $stderr.puts "Starting"
 
@@ -20,6 +20,13 @@
 
 require "thread"
 require "set"
+
+$trace=true
+
+if $trace    
+  @untraced_classes=Set.new
+  @untraced_classes.merge(Object.constants.collect {|sym| Object.const_get(sym) }.select{|cons| cons.kind_of? Module }) 
+end
 
 module Opensync      
 
@@ -184,7 +191,7 @@ module Opensync
 	def initialize_from
 	end
 
-	def initialize_new
+	def initialize_new(*args)	    
 	end
 	private :initialize_from, :initialize_new	
 	
@@ -392,9 +399,6 @@ module Opensync
     class FormatConverter < OSyncObject
 	map_methods /^osync_converter_/
 	represent SWIG::TYPE_p_OSyncFormatConverter
-			
-	def initialize_new(type, source_format, target_format, convert_func)
-	end
     end
         
     class Data < OSyncObject
@@ -417,6 +421,18 @@ module Opensync
 	    end
 	end
     end  
+    
+    class SinkState < OSyncObject
+	map_methods /^osync_sink_state_/
+	represent SWIG::TYPE_p_OSyncSinkStateDB
+	
+	# Not allocated by _new, not controled
+	def self.unref(obj)
+	end
+	
+	def self.ref(obj)
+	end
+    end
     
     class Version < OSyncObject
 	represent SWIG::TYPE_p_OSyncVersion
@@ -449,3 +465,37 @@ require "~/prog/opensync/libopensync-plugin-ruby-trunk/example/ruby-file-sync.rb
 
 # TODO: osync_objtype_main_sink_new is mapped where? What is it for? Check docs.
 #Opensync::OSyncObject.unmapped_methods.to_a.each {|method| warn("Atention! Method #{method} not mapped!") }
+
+if $trace
+  set_trace_func proc { |event, file, line, id, binding, klass|   
+    next if not Opensync::osync_trace_is_enabled                    
+    next if not klass or @untraced_classes.include?(klass) 
+        
+    case event
+    when "raise"
+        type=Opensync::TRACE_ERROR
+        msg="RUBY #{klass}.#{id} #{$!}\n#{$!.backtrace.join("\n")}"
+    when "call", "c-call"
+	type=Opensync::TRACE_ENTRY
+        args=binding.eval("local_variables.collect {|var| var }.collect{|var| eval(var.to_s)}")
+	id_s=id.to_s
+	case 
+	when (id_s[-1,1] == "=" and args.size==1)
+            msg="RUBY #{klass}.#{id_s[0..-2]}=#{args.first.inspect}"
+	when (id_s[-2,2] == "[]" and args.size==1)
+	    msg="RUBY #{klass}[#{args.first.inspect}]"
+	when (id_s[-3,3] == "[]=" and args.size==2)
+            msg="RUBY #{klass}[#{args.first.inspect}]=#{args.last.inspect}"
+	else              
+	    msg="RUBY #{klass}.#{id_s}(#{args.collect{|arg| arg.inspect}.join(",")})"        
+	end
+    when "return", "c-return"
+	type=Opensync::TRACE_EXIT
+        msg="RUBY #{klass}.#{id}"
+    else
+        next
+        #$stderr.printf "%8s %s:%-2d %10s %8s\n", event, file, line, id, klass, binding
+    end
+    Opensync::osync_trace(type, msg)                      
+  }
+end
