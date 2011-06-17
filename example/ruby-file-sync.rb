@@ -100,7 +100,7 @@ require "pathname"
 
 class RubyFileSync < Opensync::Plugin  
       class Dir
-	  attr_accessor :env, :sink, :recursive	  
+	  attr_accessor :env, :sink, :recursive, :path
       end
   
       class FileSyncEnv
@@ -132,15 +132,15 @@ class RubyFileSync < Opensync::Plugin
 	    
 	    objtype=sink.name
 	    res = config.find_active_resource(objtype)
-	    path = res.path
+	    dir.path = res.path
 	    pathes = []	    
-	    if not path or path.empty?
+	    if not dir.path or dir.path.empty?
 		raise Opensync::OsyncMisconfigurationError.new("Path for object type \"#{objtype}\" is not configured.")
 	    end
-	    if pathes.include?(path)
+	    if pathes.include?(dir.path)
 		raise Opensync::OsyncMisconfigurationError.new("Path for object type \"#{objtype}\" defined for more than one objtype.")
 	    end
-	    pathes << path
+	    pathes << dir.path
 	    
 	    res.objformat_sinks.each do
 		|sink|
@@ -159,7 +159,6 @@ class RubyFileSync < Opensync::Plugin
 	    sink.sync_done_func=callback{|*args| sync_done(*args) }
 	    
 	    sink.userdata=dir
-	    raise "userdata nao salvo" if not dir==sink.userdata
 	    sink.enable_state_db(true)
 	    sink.enable_hashtable(true)
 	    
@@ -190,19 +189,15 @@ class RubyFileSync < Opensync::Plugin
 	  state_db = sink.state_db
 	  pathmatch = nil
 	  
-	  $stderr.puts state_db
-	  
 	  pathmatch = state_db.equal("path", dir.path)  
-	  
-	  if not patchmatch
-	    ctx.report_slowsync
-	  end
+	  	  
+	  ctx.report_slowsync if not pathmatch
 	  
 	  if not File.directory?(dir.path)
 	    raise Opensync::OSyncError.new("\"#{dir.path}\" is not a directory")
 	  end
 	
-	  context.report_sucess
+	  ctx.report_success
       end      
                   
       def read_func(sink, info, ctx, change, userdata)
@@ -267,8 +262,8 @@ class RubyFileSync < Opensync::Plugin
       
       def report_dir(dir, info, subdir, ctx)
 	  formatenv=info.format_env
-	  hashtable=sink.hashtable
-	  
+	  hashtable=dir.sink.hashtable
+	  	  
 	  path = Pathname.new(dir.path) + subdir
 	  path.entries do
 	    |entry|
@@ -314,15 +309,14 @@ class RubyFileSync < Opensync::Plugin
       end
 	
       def get_changes_func(sink, info, ctx, slow_sync, userdata)
+	
 	  dir=userdata
 	  format_env = info.format_env
 	  hashtable = sink.hashtable
 	  
-	  if (slow_sync)
-	      hashtable.slowsync
-	  end
+	  hashtable.slowsync if (slow_sync)	  
 
-	  report_dir(dir, info, nil, ctx)
+	  report_dir(dir, info, "", ctx)
 	
 	  hashtable.deleted.each do
 	      |uid|
@@ -337,7 +331,7 @@ class RubyFileSync < Opensync::Plugin
 	      ctx.report_change(change)
 	      hashtable.update_change(change)
 	end
-	context.report_sucess
+	ctx.report_success
       end
       
       def filename_scape_characters(tmp)

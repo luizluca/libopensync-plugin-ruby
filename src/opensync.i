@@ -26,6 +26,13 @@
  $result = ($1==FALSE ? Qfalse : Qtrue); 
 }
 
+%typemap(in) void* { 
+  $1 = (void*)$input; 
+}
+%typemap(out) void* { 
+  $result = $1 ? (VALUE)$1 : Qnil;
+}
+
 %typemap(in) time_t { 
   $1 = FIX2LONG(rb_funcall($input, rb_intern("to_i"), 0)); 
 }
@@ -162,3 +169,4 @@ typedef enum {
 %include "opensync/data/opensync_data.h"
 %include "opensync/debug/opensync_trace.h"
 %include "opensync/helper/opensync_sink_state_db.h"
+%include "opensync/helper/opensync_hashtable.h"

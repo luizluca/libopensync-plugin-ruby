@@ -434,6 +434,18 @@ module Opensync
 	end
     end
     
+    class HashTable < OSyncObject
+	map_methods /^osync_hashtable_/
+	represent SWIG::TYPE_p_OSyncHashTable
+	
+	# Not allocated by _new, not controled
+	def self.unref(obj)
+	end
+	
+	def self.ref(obj)
+	end
+    end
+    
     class Version < OSyncObject
 	represent SWIG::TYPE_p_OSyncVersion
 	# TODO
