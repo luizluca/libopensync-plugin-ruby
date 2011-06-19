@@ -18,7 +18,7 @@
  *
  */
 
-// TODO: deal correctly with error. Ideally, does not pass and use Exception
+// TODO: study ruby memory managment and fix any memory leaks
 
 #include "ruby_module.h"
 
@@ -47,7 +47,7 @@ RUBY_GLOBAL_SETUP
 
 /* This mutex avoids concurrent use of ruby context (which is prohibit) */
 static pthread_mutex_t ruby_context_lock = PTHREAD_MUTEX_INITIALIZER;
-static osync_bool      	ruby_initialized = FALSE;
+static osync_bool      ruby_initialized = FALSE;
 
 VALUE rb_fcall2_wrapper ( VALUE* params ) {
     //fprintf(stderr,"run %d.%s(...)\n",(uint)params[0],(char*)params[1]);
@@ -567,7 +567,7 @@ static void *osync_rubymodule_plugin_initialize ( OSyncPlugin *plugin, OSyncPlug
     rb_gc_register_address(&result);
     pthread_mutex_unlock ( &ruby_context_lock );
     osync_trace ( TRACE_EXIT, "%s: %lu", __func__, result );
-    
+
     return ( void* ) result;
 error:
     pthread_mutex_unlock ( &ruby_context_lock );
@@ -699,7 +699,7 @@ static osync_bool osync_rubymodule_objformat_finalize ( OSyncObjFormat *format, 
     //format_data->data=NULL;
     if (user_data)
       rb_gc_unregister_address((VALUE*)&user_data);
-	
+
     pthread_mutex_unlock ( &ruby_context_lock );
     osync_trace ( TRACE_EXIT, "%s: %i", __func__, TRUE );
     return TRUE;
@@ -1183,7 +1183,7 @@ error:
 //     void *argp1 = 0 ;
 //     int res1 = 0 ;
 //     VALUE vresult = Qnil;
-// 
+//
 //     if ( ( argc < 1 ) || ( argc > 1 ) ) {
 //         rb_raise ( rb_eArgError, "wrong # of arguments(%d for 1)",argc );
 //         SWIG_fail;
@@ -1346,7 +1346,7 @@ rb_osync_rubymodule_objtype_sink_set_userdata ( int argc, VALUE *argv, VALUE sel
     if ( data )
         rb_gc_unregister_address ( &data );
 
-    osync_objtype_sink_set_userdata ( arg1, ( void* ) argv[1] );    
+    osync_objtype_sink_set_userdata ( arg1, ( void* ) argv[1] );
     rb_gc_register_address ( &data );
     return Qnil;
 fail:
@@ -2078,15 +2078,15 @@ A module function.
 // }
 
 void ruby_initialize() {
-    if ( ruby_initialized )
+    if ( ruby_initialized ) {
         return;
+    }
 
     ruby_initialized=TRUE;
 
     /* Initialize Ruby env */
     RUBY_INIT_STACK;
     ruby_init();
-    // TODO add custom path
     ruby_init_loadpath();
     ruby_script ( RUBY_SCRIPTNAME );
     // SWIG initialize (include the module)
@@ -2132,6 +2132,8 @@ void ruby_initialize() {
 
     rb_define_module_function ( mOpensync, "osync_converter_new", rb_osync_converter_new, -1 );
 
+    rb_define_const(mOpensync, "OPENSYNC_RUBYPLUGIN_DIR", SWIG_FromCharPtr (OPENSYNC_RUBYPLUGIN_DIR));
+    rb_define_const(mOpensync, "OPENSYNC_RUBYFORMATS_DIR", SWIG_FromCharPtr (OPENSYNC_RUBYFORMATS_DIR));
     rubymodule_data = g_hash_table_new_full ( g_direct_hash, g_direct_equal, NULL, ( GDestroyNotify ) g_hash_table_destroy );
 }
 
