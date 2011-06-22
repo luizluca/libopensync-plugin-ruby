@@ -20,6 +20,9 @@
 
 // TODO: study ruby memory managment and fix any memory leaks
 
+// TODO Call free after any unregister
+// BUG: get_*_info must be first runned in Main Thread, not child one (ruby limitation)
+
 #include "ruby_module.h"
 
 #include <pthread.h>
@@ -44,6 +47,8 @@
 #define IS_TIME(value)   (TYPE(value)==rb_cTime)
 
 #define CAST_VALUE(value)     (value==NULL?Qnil:(VALUE)value)
+#define IND_VALUE(value)      (value==NULL?Qnil:*(VALUE*)value)
+
 
 RUBY_GLOBAL_SETUP
 
@@ -63,11 +68,19 @@ void *get_sp() {
 VALUE rb_fcall2_wrapper ( VALUE* params ) {
     //fprintf(stderr,"run %d.%s(...)\n",(uint)params[0],(char*)params[1]);
     VALUE result;
-    RUBY_INIT_STACK;
-    fprintf(stderr,"STACK: 0x%p\n", get_sp());
+//     RUBY_INIT_STACK;
+    pthread_t this_thread = pthread_self();
+    char  *name;
+    fprintf(stderr,"STACK: 0x%p Thread: %lu ", get_sp(), this_thread);
+    //name = RSTRING_PTR(rb_funcall2 (params[0], rb_intern("to_s"), 0,0));
+    name = RSTRING_PTR(rb_funcall2 (params[0], rb_intern("inspect"), 0,0));
+    fprintf(stderr,"Calling %s.%s()...",name, ( char* )params[1]);
     result = rb_funcall2 ( params[0], rb_intern ( ( char* ) params[1] ), ( int ) params[2], ( VALUE* ) params[3] );
-//  fprintf(stderr, "%lu\n", rb_mGC);
+    fprintf(stderr,"returned!");
+    fprintf(stderr," GarbageCollecting...",name, ( char* )params[1]);
     rb_funcall (rb_mGC, rb_intern ( "start"), 0);
+    fprintf(stderr,"done!");
+    fprintf(stderr,"\n");
     return result;
 }
 
@@ -111,8 +124,11 @@ void osync_rubymodule_set_data ( void* ptr, char const *key, VALUE data ) {
     g_hash_table_remove ( ptr_data, key );
 
     if ( data != Qnil ) {
-        g_hash_table_insert ( ptr_data, ( char* ) key, ( void* ) data );
-        rb_gc_register_address ( &data );
+        //rb_gc_register_address ( &data );
+	VALUE *pdata = malloc(sizeof(VALUE));
+	*pdata = data;
+	g_hash_table_insert ( ptr_data, ( char* ) key, pdata );
+	rb_gc_register_address ( pdata );
     }
 
     pthread_mutex_unlock ( &rubymodule_data_lock );
@@ -120,7 +136,7 @@ void osync_rubymodule_set_data ( void* ptr, char const *key, VALUE data ) {
 
 VALUE osync_rubymodule_get_data ( void* ptr, char const *key ) {
     GHashTable *ptr_data;
-    VALUE saved_data;
+    VALUE      *saved_data;
 
 //     fprintf(stderr, "%p[\"%s\"@%p]-> ", ptr, key, &key);
 
@@ -130,14 +146,14 @@ VALUE osync_rubymodule_get_data ( void* ptr, char const *key ) {
         return Qnil;
     }
 
-    saved_data = ( VALUE ) g_hash_table_lookup ( ptr_data, key );
+    saved_data = ( VALUE* ) g_hash_table_lookup ( ptr_data, key );
     if ( !saved_data ) {
 // 	fprintf(stderr, "%s not found\n", key);
         return Qnil;
     }
 
 //     fprintf(stderr, "%lu\n", ptr, key, saved_data);
-    return saved_data;
+    return *saved_data;
 }
 
 void osync_rubymodule_clean_data ( void* ptr ) {
@@ -206,8 +222,9 @@ fail:
     return Qnil;
 }
 
-static void free_plugin_data ( VALUE data ) {
-    rb_gc_unregister_address ( &data );
+static void free_plugin_data ( VALUE *data ) {
+    // I guess gc will free this data
+    rb_gc_unregister_address ( data );
 }
 
 static void osync_rubymodule_objtype_sink_connect ( OSyncObjTypeSink *sink, OSyncPluginInfo *info, OSyncContext *ctx, void *data ) {
@@ -216,16 +233,14 @@ static void osync_rubymodule_objtype_sink_connect ( OSyncObjTypeSink *sink, OSyn
     OSyncError *error = 0;
 
     VALUE callback = osync_rubymodule_get_data ( sink, "connect_func" );
-    VALUE ruby_data = CAST_VALUE(data);
     assert(callback);
-    assert(ruby_data);
 
     pthread_mutex_lock ( &ruby_context_lock );
     VALUE args[4];
     args[0] = SWIG_NewPointerObj ( SWIG_as_voidptr ( sink ), SWIGTYPE_p_OSyncObjTypeSink, 0 |  0 );
     args[1] = SWIG_NewPointerObj ( SWIG_as_voidptr ( info ), SWIGTYPE_p_OSyncPluginInfo, 0 |  0 );
     args[2] = SWIG_NewPointerObj ( SWIG_as_voidptr ( ctx ), SWIGTYPE_p_OSyncContext, 0 |  0 );
-    args[3] = ruby_data;
+    args[3] = IND_VALUE(data);
     /*VALUE result = */
     rb_fcall2_protected ( callback, "call", 4, args, &status );
     if ( status!=0 ) {
@@ -250,9 +265,7 @@ static void osync_rubymodule_objtype_sink_get_changes ( OSyncObjTypeSink *sink, 
     OSyncError *error = 0;
 
     VALUE callback = osync_rubymodule_get_data ( sink, "get_changes_func" );
-    VALUE ruby_data = data? ( VALUE ) data: Qnil;
     assert(callback);
-    assert(ruby_data);
 
     pthread_mutex_lock ( &ruby_context_lock );
     VALUE args[5];
@@ -260,7 +273,7 @@ static void osync_rubymodule_objtype_sink_get_changes ( OSyncObjTypeSink *sink, 
     args[1] = SWIG_NewPointerObj ( SWIG_as_voidptr ( info ), SWIGTYPE_p_OSyncPluginInfo, 0 |  0 );
     args[2] = SWIG_NewPointerObj ( SWIG_as_voidptr ( ctx ), SWIGTYPE_p_OSyncContext, 0 |  0 );
     args[3] = BOOLR ( slow_sync );
-    args[4] = ruby_data;
+    args[4] = IND_VALUE(data);
     /*VALUE result = */
     rb_fcall2_protected ( callback, "call", 5, args, &status );
     if ( status!=0 ) {
@@ -284,9 +297,7 @@ static void osync_rubymodule_objtype_sink_commit ( OSyncObjTypeSink *sink, OSync
     int status;
     OSyncError *error = 0;
     VALUE callback = osync_rubymodule_get_data ( sink, "commit_func" );
-    VALUE ruby_data = data? ( VALUE ) data: Qnil;
     assert(callback);
-    assert(ruby_data);
 
     pthread_mutex_lock ( &ruby_context_lock );
     VALUE args[5];
@@ -294,7 +305,7 @@ static void osync_rubymodule_objtype_sink_commit ( OSyncObjTypeSink *sink, OSync
     args[1] = SWIG_NewPointerObj ( SWIG_as_voidptr ( info ), SWIGTYPE_p_OSyncPluginInfo, 0 |  0 );
     args[2] = SWIG_NewPointerObj ( SWIG_as_voidptr ( ctx ), SWIGTYPE_p_OSyncContext, 0 |  0 );
     args[3] = SWIG_NewPointerObj ( SWIG_as_voidptr ( ctx ), SWIGTYPE_p_OSyncChange, 0 |  0 );
-    args[4] = ruby_data;
+    args[4] = IND_VALUE(data);
     /*VALUE result = */
     rb_fcall2_protected ( callback, "call", 5, args, &status );
     if ( status!=0 ) {
@@ -318,16 +329,14 @@ static void osync_rubymodule_objtype_sink_commited_all ( OSyncObjTypeSink *sink,
     int status;
     OSyncError *error = 0;
     VALUE callback = osync_rubymodule_get_data ( sink, "commited_all" );
-    VALUE ruby_data = data? ( VALUE ) data: Qnil;
     assert(callback);
-    assert(ruby_data);
 
     pthread_mutex_lock ( &ruby_context_lock );
     VALUE args[4];
     args[0] = SWIG_NewPointerObj ( SWIG_as_voidptr ( sink ), SWIGTYPE_p_OSyncObjTypeSink, 0 |  0 );
     args[1] = SWIG_NewPointerObj ( SWIG_as_voidptr ( info ), SWIGTYPE_p_OSyncPluginInfo, 0 |  0 );
     args[2] = SWIG_NewPointerObj ( SWIG_as_voidptr ( ctx ), SWIGTYPE_p_OSyncContext, 0 |  0 );
-    args[3] = ruby_data;
+    args[3] = IND_VALUE(data);
     /*VALUE result = */
     rb_fcall2_protected ( callback, "call", 4, args, &status );
     if ( status!=0 ) {
@@ -351,9 +360,7 @@ static void osync_rubymodule_objtype_sink_read ( OSyncObjTypeSink *sink, OSyncPl
     int status;
     OSyncError *error = 0;
     VALUE callback = osync_rubymodule_get_data ( sink, "read_func" );
-    VALUE ruby_data = data? ( VALUE ) data: Qnil;
     assert(callback);
-    assert(ruby_data);
 
     pthread_mutex_lock ( &ruby_context_lock );
     VALUE args[5];
@@ -361,7 +368,7 @@ static void osync_rubymodule_objtype_sink_read ( OSyncObjTypeSink *sink, OSyncPl
     args[1] = SWIG_NewPointerObj ( SWIG_as_voidptr ( info ), SWIGTYPE_p_OSyncPluginInfo, 0 |  0 );
     args[2] = SWIG_NewPointerObj ( SWIG_as_voidptr ( ctx ), SWIGTYPE_p_OSyncContext, 0 |  0 );
     args[3] = SWIG_NewPointerObj ( SWIG_as_voidptr ( ctx ), SWIGTYPE_p_OSyncChange, 0 |  0 );
-    args[4] = ruby_data;
+    args[4] = IND_VALUE(data);
     /*VALUE result = */
     rb_fcall2_protected ( callback, "call", 5, args, &status );
     if ( status!=0 ) {
@@ -386,16 +393,14 @@ static void osync_rubymodule_objtype_sink_sync_done ( OSyncObjTypeSink *sink, OS
     OSyncError *error = 0;
 
     VALUE callback = osync_rubymodule_get_data ( sink, "sync_done_func" );
-    VALUE ruby_data = data? ( VALUE ) data: Qnil;
     assert(callback);
-    assert(ruby_data);
 
     pthread_mutex_lock ( &ruby_context_lock );
     VALUE args[4];
     args[0] = SWIG_NewPointerObj ( SWIG_as_voidptr ( sink ), SWIGTYPE_p_OSyncObjTypeSink, 0 |  0 );
     args[1] = SWIG_NewPointerObj ( SWIG_as_voidptr ( info ), SWIGTYPE_p_OSyncPluginInfo, 0 |  0 );
     args[2] = SWIG_NewPointerObj ( SWIG_as_voidptr ( ctx ), SWIGTYPE_p_OSyncContext, 0 |  0 );
-    args[3] = ruby_data;
+    args[3] = IND_VALUE(data);
     /*VALUE result = */
     rb_fcall2_protected ( callback, "call", 4, args, &status );
     if ( status!=0 ) {
@@ -420,9 +425,7 @@ static void osync_rubymodule_objtype_sink_connect_done ( OSyncObjTypeSink *sink,
     OSyncError *error = 0;
 
     VALUE callback = osync_rubymodule_get_data ( sink, "connect_done" );
-    VALUE ruby_data = data? ( VALUE ) data: Qnil;
     assert(callback);
-    assert(ruby_data);
 
     pthread_mutex_lock ( &ruby_context_lock );
     VALUE args[5];
@@ -430,7 +433,7 @@ static void osync_rubymodule_objtype_sink_connect_done ( OSyncObjTypeSink *sink,
     args[1] = SWIG_NewPointerObj ( SWIG_as_voidptr ( info ), SWIGTYPE_p_OSyncPluginInfo, 0 |  0 );
     args[2] = SWIG_NewPointerObj ( SWIG_as_voidptr ( ctx ), SWIGTYPE_p_OSyncContext, 0 |  0 );
     args[3] = BOOLR ( slow_sync );
-    args[4] = ruby_data;
+    args[4] = IND_VALUE(data);
     /*VALUE result = */
     rb_fcall2_protected ( callback, "call", 5, args, &status );
     if ( status!=0 ) {
@@ -454,16 +457,14 @@ static void osync_rubymodule_objtype_sink_disconnect ( OSyncObjTypeSink *sink, O
     int status;
     OSyncError *error = 0;
     VALUE callback = osync_rubymodule_get_data ( sink, "disconnect" );
-    VALUE ruby_data = data? ( VALUE ) data: Qnil;
     assert(callback);
-    assert(ruby_data);
 
     pthread_mutex_lock ( &ruby_context_lock );
     VALUE args[4];
     args[0] = SWIG_NewPointerObj ( SWIG_as_voidptr ( sink ), SWIGTYPE_p_OSyncObjTypeSink, 0 |  0 );
     args[1] = SWIG_NewPointerObj ( SWIG_as_voidptr ( info ), SWIGTYPE_p_OSyncPluginInfo, 0 |  0 );
     args[2] = SWIG_NewPointerObj ( SWIG_as_voidptr ( ctx ), SWIGTYPE_p_OSyncContext, 0 |  0 );
-    args[3] = ruby_data;
+    args[3] = IND_VALUE(data);
     /*VALUE result = */
     rb_fcall2_protected ( callback, "call", 4, args, &status );
     if ( status!=0 ) {
@@ -503,11 +504,13 @@ static void *osync_rubymodule_plugin_initialize ( OSyncPlugin *plugin, OSyncPlug
                           osync_rubymodule_error_bt ( __FILE__, __func__,__LINE__ ) );
         goto error;
     }
-    rb_gc_register_address(&result);
+    VALUE *pplugin_data = malloc(sizeof(VALUE));
+    *pplugin_data = result;
+    rb_gc_register_address(pplugin_data);
     pthread_mutex_unlock ( &ruby_context_lock );
-    osync_trace ( TRACE_EXIT, "%s: %lu", __func__, result );
+    osync_trace ( TRACE_EXIT, "%s: %lu", __func__, *pplugin_data );
 
-    return ( void* )result;
+    return pplugin_data;
 error:
     pthread_mutex_unlock ( &ruby_context_lock );
     osync_trace ( TRACE_EXIT_ERROR, "%s: %s", __func__, osync_error_print ( error ) );
@@ -525,7 +528,7 @@ static void osync_rubymodule_plugin_finalize ( OSyncPlugin *plugin, void* plugin
     pthread_mutex_lock ( &ruby_context_lock );
     VALUE args[2];
     args[0] = SWIG_NewPointerObj ( SWIG_as_voidptr ( plugin ), SWIGTYPE_p_OSyncPlugin, 0 |  0 );
-    args[1] = CAST_VALUE(plugin_data);
+    args[1] = IND_VALUE(plugin_data);
     /*VALUE result = */
     rb_fcall2_protected ( callback, "call", 2, args, &status );
     /* there is no error return, no one is interested if finalize fails
@@ -535,7 +538,7 @@ static void osync_rubymodule_plugin_finalize ( OSyncPlugin *plugin, void* plugin
     goto error;
     } */
     if (plugin_data)
-      rb_gc_unregister_address((VALUE*)&plugin_data);
+      rb_gc_unregister_address(plugin_data);
     pthread_mutex_unlock ( &ruby_context_lock );
 
     osync_trace ( TRACE_EXIT, "%s", __func__ );
@@ -553,7 +556,7 @@ static osync_bool osync_rubymodule_plugin_discover ( OSyncPlugin *plugin, OSyncP
     VALUE args[3];
     args[0] = SWIG_NewPointerObj ( SWIG_as_voidptr ( plugin ), SWIGTYPE_p_OSyncPlugin, 0 |  0 );
     args[1] = SWIG_NewPointerObj ( SWIG_as_voidptr ( info ), SWIGTYPE_p_OSyncPluginInfo, 0 |  0 );
-    args[2] = CAST_VALUE(plugin_data);
+    args[2] = IND_VALUE(plugin_data);
     VALUE result = rb_fcall2_protected ( callback, "call", 3, args, &status );
     if ( status!=0 ) {
         osync_error_set ( error, OSYNC_ERROR_INITIALIZATION, "Failed to call plugin discover function!\n%s",
@@ -606,10 +609,13 @@ static void *osync_rubymodule_objformat_initialize ( OSyncObjFormat *format, OSy
                           osync_rubymodule_error_bt ( __FILE__, __func__,__LINE__ ) );
         goto error;
     }
+    VALUE *puser_data = malloc(sizeof(VALUE));
+    *puser_data = result;
+    rb_gc_register_address(puser_data);
     pthread_mutex_unlock ( &ruby_context_lock );
-    osync_trace ( TRACE_EXIT, "%s: %lu", __func__, result );
-    rb_gc_register_address(&result);
-    return ( void * ) result;
+    osync_trace ( TRACE_EXIT, "%s: %lu", __func__, *puser_data );
+
+    return puser_data;
 error:
     pthread_mutex_unlock ( &ruby_context_lock );
     osync_trace ( TRACE_EXIT_ERROR, "%s: %s", __func__, osync_error_print ( error ) );
@@ -638,7 +644,7 @@ static osync_bool osync_rubymodule_objformat_finalize ( OSyncObjFormat *format, 
     // Should I need this (and ruby unref)?
     //format_data->data=NULL;
     if (user_data)
-      rb_gc_unregister_address((VALUE*)&user_data);
+      rb_gc_unregister_address(user_data);
 
     pthread_mutex_unlock ( &ruby_context_lock );
     osync_trace ( TRACE_EXIT, "%s: %i", __func__, TRUE );
@@ -660,7 +666,7 @@ static OSyncConvCmpResult osync_rubymodule_objformat_compare ( OSyncObjFormat *f
     args[0] = SWIG_NewPointerObj ( SWIG_as_voidptr ( format ), SWIGTYPE_p_OSyncObjFormat, 0 |  0 );
     args[1] = SWIG_FromCharPtrAndSize ( leftdata, leftsize );
     args[2] = SWIG_FromCharPtrAndSize ( rightdata, rightsize );
-    args[3] = CAST_VALUE(user_data);
+    args[3] = IND_VALUE(user_data);
     VALUE result = rb_fcall2_protected ( callback, "call", 4, args, &status );
     if ( status!=0 ) {
         osync_error_set ( error, OSYNC_ERROR_GENERIC, "Failed to call objformat initializing function!\n%s",
@@ -690,7 +696,7 @@ static char *osync_rubymodule_objformat_print ( OSyncObjFormat *format, const ch
     VALUE args[3];
     args[0] = SWIG_NewPointerObj ( SWIG_as_voidptr ( format ), SWIGTYPE_p_OSyncObjFormat, 0 |  0 );
     args[1] = SWIG_FromCharPtrAndSize ( data, size );
-    args[2] = CAST_VALUE(user_data);
+    args[2] = IND_VALUE(user_data);
     VALUE result = rb_fcall2_protected ( callback, "call", 3, args, &status );
     if ( status!=0 ) {
         osync_error_set ( error, OSYNC_ERROR_INITIALIZATION, "Failed to call objformat initializing function!\n%s",
@@ -720,7 +726,7 @@ static time_t osync_rubymodule_objformat_revision ( OSyncObjFormat *format, cons
     VALUE args[3];
     args[0] = SWIG_NewPointerObj ( SWIG_as_voidptr ( format ), SWIGTYPE_p_OSyncObjFormat, 0 |  0 );
     args[1] = SWIG_FromCharPtrAndSize ( data, size );
-    args[2] = CAST_VALUE(user_data);
+    args[2] = IND_VALUE(user_data);
     VALUE result = rb_fcall2_protected ( callback, "call", 3, args, &status );
     if ( status!=0 ) {
         osync_error_set ( error, OSYNC_ERROR_GENERIC, "Failed to call objformat initializing function!\n%s",
@@ -759,7 +765,7 @@ static osync_bool osync_rubymodule_objformat_destroy ( OSyncObjFormat *format, c
     VALUE args[3];
     args[0] = SWIG_NewPointerObj ( SWIG_as_voidptr ( format ), SWIGTYPE_p_OSyncObjFormat, 0 |  0 );
     args[1] = SWIG_FromCharPtrAndSize ( data, size );
-    args[2] = CAST_VALUE(user_data);
+    args[2] = IND_VALUE(user_data);
     VALUE result = rb_fcall2_protected ( callback, "call", 3, args, &status );
     if ( status!=0 ) {
         osync_error_set ( error, OSYNC_ERROR_INITIALIZATION, "Failed to call objformat initializing function!\n%s",
@@ -787,7 +793,7 @@ static osync_bool osync_rubymodule_objformat_copy ( OSyncObjFormat *format, cons
     VALUE args[2];
     args[0] = SWIG_NewPointerObj ( SWIG_as_voidptr ( format ), SWIGTYPE_p_OSyncObjFormat, 0 |  0 );
     args[1] = SWIG_FromCharPtrAndSize ( input, insize );
-    args[2] = CAST_VALUE(user_data);
+    args[2] = IND_VALUE(user_data);
     VALUE result = rb_fcall2_protected ( callback, "call", 3, args, &status );
     if ( status!=0 ) {
         osync_error_set ( error, OSYNC_ERROR_INITIALIZATION, "Failed to call objformat initializing function!\n%s",
@@ -821,7 +827,7 @@ static osync_bool osync_rubymodule_objformat_duplicate ( OSyncObjFormat *format,
     args[0] = SWIG_NewPointerObj ( SWIG_as_voidptr ( format ), SWIGTYPE_p_OSyncObjFormat, 0 |  0 );
     args[1] = SWIG_FromCharPtrAndSize ( uid, strlen ( uid ) );
     args[2] = SWIG_FromCharPtrAndSize ( input, insize );
-    args[3] = CAST_VALUE(user_data);
+    args[3] = IND_VALUE(user_data);
     VALUE result = rb_fcall2_protected ( callback, "call", 4, args, &status );
     if ( status!=0 ) {
         osync_error_set ( error, OSYNC_ERROR_INITIALIZATION, "Failed to call objformat initializing function!\n%s",
@@ -860,7 +866,7 @@ static osync_bool osync_rubymodule_objformat_create ( OSyncObjFormat *format, ch
     pthread_mutex_lock ( &ruby_context_lock );
     VALUE args[2];
     args[0] = SWIG_NewPointerObj ( SWIG_as_voidptr ( format ), SWIGTYPE_p_OSyncObjFormat, 0 |  0 );
-    args[1] = CAST_VALUE(user_data);
+    args[1] = IND_VALUE(user_data);
     VALUE result = rb_fcall2_protected ( callback, "call", 2, args, &status );
     if ( status!=0 ) {
         osync_error_set ( error, OSYNC_ERROR_INITIALIZATION, "Failed to call objformat initializing function!\n%s",
@@ -1231,6 +1237,7 @@ rb_osync_plugin_set_discover_func ( int argc, VALUE *argv, VALUE self ) {
         SWIG_exception_fail ( SWIG_ArgError ( res1 ), Ruby_Format_TypeError ( "", "OSyncPlugin *","osync_plugin_set_discover", 1, argv[0] ) );
     }
     arg1 = ( OSyncPlugin * ) ( argp1 );
+
     osync_rubymodule_set_data ( argp1, "discover_func", argv[1] );
     osync_plugin_set_discover_func ( arg1,osync_rubymodule_plugin_discover );
     return Qnil;
@@ -1246,7 +1253,7 @@ rb_osync_rubymodule_objtype_sink_get_userdata ( int argc, VALUE *argv, VALUE sel
     OSyncObjTypeSink *arg1 = ( OSyncObjTypeSink * ) 0 ;
     void *argp1 = 0 ;
     int res1 = 0 ;
-    VALUE vresult = Qnil;
+    VALUE *vresult = NULL;
 
     if ( ( argc < 1 ) || ( argc > 1 ) ) {
         rb_raise ( rb_eArgError, "wrong # of arguments(%d for 1)",argc );
@@ -1257,11 +1264,11 @@ rb_osync_rubymodule_objtype_sink_get_userdata ( int argc, VALUE *argv, VALUE sel
         SWIG_exception_fail ( SWIG_ArgError ( res1 ), Ruby_Format_TypeError ( "", "OSyncObjTypeSink *","osync_objtype_sink_get_data", 1, argv[0] ) );
     }
     arg1 = ( OSyncObjTypeSink * ) ( argp1 );
-    vresult = ( VALUE ) osync_objtype_sink_get_userdata ( arg1 );
+    vresult = osync_objtype_sink_get_userdata ( arg1 );
 
-    if ( !vresult )
-        vresult=Qnil;
-    return vresult;
+    if ( vresult )
+        return *vresult;
+    return Qnil;
 fail:
     return Qnil;
 }
@@ -1271,7 +1278,7 @@ rb_osync_rubymodule_objtype_sink_set_userdata ( int argc, VALUE *argv, VALUE sel
     OSyncObjTypeSink *arg1 = ( OSyncObjTypeSink * ) 0 ;
     void *argp1 = 0 ;
     int res1 = 0 ;
-    VALUE data;
+    VALUE *data;
 
     if ( ( argc < 2 ) || ( argc > 2 ) ) {
         rb_raise ( rb_eArgError, "wrong # of arguments(%d for 2)",argc );
@@ -1282,12 +1289,13 @@ rb_osync_rubymodule_objtype_sink_set_userdata ( int argc, VALUE *argv, VALUE sel
         SWIG_exception_fail ( SWIG_ArgError ( res1 ), Ruby_Format_TypeError ( "", "OSyncObjTypeSink *","osync_objtype_sink_set_data", 1, argv[0] ) );
     }
     arg1 = ( OSyncObjTypeSink * ) ( argp1 );
-    data = ( VALUE ) osync_objtype_sink_get_userdata ( arg1 );
+    data = osync_objtype_sink_get_userdata ( arg1 );
     if ( data )
-        rb_gc_unregister_address ( &data );
-
-    osync_objtype_sink_set_userdata ( arg1, ( void* ) argv[1] );
-    rb_gc_register_address ( &data );
+        rb_gc_unregister_address ( data );
+    data=malloc(sizeof(VALUE));
+    *data=argv[1];
+    osync_objtype_sink_set_userdata ( arg1, data);
+    rb_gc_register_address ( data );
     return Qnil;
 fail:
     return Qnil;

@@ -193,6 +193,7 @@ module Opensync
 
 	def self.cleanup_on_GC(obj,_self)
 	    destructor=Proc.new do
+		$stderr.puts "Cleanning someone!!!!"
 		# cleanup C world userdata
 		#self.ruby_free(_self) if need_ruby_init?
 		self.unref(_self)
@@ -532,7 +533,7 @@ end
 
 # TODO: osync_objtype_main_sink_new is mapped where? What is it for? Check docs.
 #Opensync::OSyncObject.unmapped_methods.to_a.each {|method| warn("Atention! Method #{method} not mapped!") }
-
+#GC.stress=true
 if $trace
   @untraced_classes << Opensync::OSyncObject
   set_trace_func proc {
