@@ -115,7 +115,7 @@ class RubyFileSync < Opensync::Plugin
 	  self.longname="File Synchronization Plugin"
 	  self.description="Plugin to synchronize files on the local filesystem"
 	  self.initialize_func=self.callback {|plugin, info| initialize0(info)}
-	  self.finalize_func=self.callback   {|plugin| finalize}
+	  self.finalize_func=self.callback   {|plugin, plugin_data| finalize(plugin_data) }
 	  self.discover_func=self.callback   {|plugin, info| discover(info)}
       end
 
@@ -170,7 +170,7 @@ class RubyFileSync < Opensync::Plugin
 
       def finalize(plugin_data)
 	  # Clean the callback references (and let GC clean) TODO: check
-	  data.directories.each {|dir| dir.sink.clean }
+	  plugin_data.directories.each {|dir| dir.sink.clean }
 
 	  # Maybe a module can be initialized and finalized and initialized and finalize and...
 	  # better don't save this bits
@@ -362,7 +362,7 @@ class RubyFileSync < Opensync::Plugin
 	dir=userdata
 	state_db = sink.state_db
 	state_db.set("path", dir.path)
-	contex.report_success
+	ctx.report_success
       end
 end
 

@@ -30,6 +30,8 @@
 #include <glib.h>
 #include "opensyncRUBY_wrap.c"
 
+#include<stdio.h>
+
 #define RBOOL(value) ((value==Qfalse) || (value==Qnil) ? FALSE : TRUE)
 #define BOOLR(value) (value==FALSE ? Qfalse : Qtrue)
 
@@ -49,9 +51,24 @@ RUBY_GLOBAL_SETUP
 static pthread_mutex_t ruby_context_lock = PTHREAD_MUTEX_INITIALIZER;
 static osync_bool      ruby_initialized = FALSE;
 
+void *get_sp() {
+    asm("movl %esp,%eax");
+}
+
+// thread detached
+// pthread_once_t once_control = PTHREAD_ONCE_INIT
+// pthread_once (once_control, init_routine)
+
+
 VALUE rb_fcall2_wrapper ( VALUE* params ) {
     //fprintf(stderr,"run %d.%s(...)\n",(uint)params[0],(char*)params[1]);
-    return rb_funcall2 ( params[0], rb_intern ( ( char* ) params[1] ), ( int ) params[2], ( VALUE* ) params[3] );
+    VALUE result;
+    RUBY_INIT_STACK;
+    fprintf(stderr,"STACK: 0x%p\n", get_sp());
+    result = rb_funcall2 ( params[0], rb_intern ( ( char* ) params[1] ), ( int ) params[2], ( VALUE* ) params[3] );
+//  fprintf(stderr, "%lu\n", rb_mGC);
+    rb_funcall (rb_mGC, rb_intern ( "start"), 0);
+    return result;
 }
 
 VALUE rb_fcall2_protected ( VALUE recv, const char* method, int argc, VALUE* args, int* status ) {
@@ -193,101 +210,6 @@ static void free_plugin_data ( VALUE data ) {
     rb_gc_unregister_address ( &data );
 }
 
-// /* XXX: All these declarations and the two folowing functions are hackish in order to
-//  * bypass the missing osync_objtype_sink_get_userdata!
-//  */
-// static pthread_mutex_t sinks_userdata_lock = PTHREAD_MUTEX_INITIALIZER;
-// static OSyncList *sinks_userdata = NULL;
-// typedef struct Sync2UserData {
-//     OSyncObjTypeSink *sink;
-//     void             *data;
-// } OsyncSink2Data;
-// static void osync_objtype_sink_set_userdata_xxx ( OSyncObjTypeSink *sink, void *data )
-// {
-//     osync_objtype_sink_set_userdata ( sink, data );
-//
-//     /* XXX: As I do not have sink_get_userdata, keep a list of it */
-//     pthread_mutex_lock ( &sinks_userdata_lock );
-//
-//     OsyncSink2Data *found = NULL;
-//     OSyncList *item = NULL;
-//
-//     if ( sinks_userdata ) {
-//         for ( item = sinks_userdata; item; item = item->next ) {
-//             OsyncSink2Data *sync2user_data = ( OsyncSink2Data* ) item->data;
-//             if ( sync2user_data->sink == sink ) {
-//                 found = sync2user_data;
-//                 break;
-//             }
-//         }
-//     }
-//     if ( !found ) {
-//         if ( data ) {
-//             found = ( OsyncSink2Data* ) malloc ( sizeof ( OsyncSink2Data ) );
-//             found->sink = sink;
-//             found->data = data;
-//             sinks_userdata = osync_list_prepend ( sinks_userdata, found );
-//         }
-//     } else {
-//         if ( data ) {
-//             found->data = data;
-//         } else if ( found ) {
-//             sinks_userdata = osync_list_delete_link ( sinks_userdata, item );
-//             free ( found );
-//         }
-//     }
-//     pthread_mutex_unlock ( &sinks_userdata_lock );
-// }
-//
-// /* Why this function is not exported in libs? When loaded as plugin, this is avaiable but it is declared in no avaiable .h
-//  * I dunno why but I'll keep it internal for ruby interfaces */
-// static void *osync_objtype_sink_get_userdata_xxx ( OSyncObjTypeSink *sink )
-// {
-//     pthread_mutex_lock ( &sinks_userdata_lock );
-//     void* result = NULL;
-//     if ( !sinks_userdata )
-//         goto unlock;
-//
-//     OSyncList *list = sinks_userdata;
-//     OSyncList *item = NULL;
-//
-//     for ( item = list; item; item = item->next ) {
-//         OsyncSink2Data *sync2user_data = ( OsyncSink2Data* ) item->data;
-//         if ( sync2user_data->sink == sink ) {
-//             result = sync2user_data->data;
-//             break;
-//         }
-//     }
-// unlock:
-//     pthread_mutex_unlock ( &sinks_userdata_lock );
-//     return result;
-// }
-//
-// static void free_objtype_sink_data ( OSyncRubyModuleObjectTypeSinkData *data )
-// {
-//     if ( data ) {
-//         if ( data->commit_fn )
-//             rb_gc_unregister_address ( & ( data->commit_fn ) );
-//         if ( data->commited_all_fn )
-//             rb_gc_unregister_address ( & ( data->commited_all_fn ) );
-//         if ( data->connect_done_fn )
-//             rb_gc_unregister_address ( & ( data->connect_done_fn ) );
-//         if ( data->connect_fn )
-//             rb_gc_unregister_address ( & ( data->connect_fn ) );
-//         if ( data->disconnect_fn )
-//             rb_gc_unregister_address ( & ( data->disconnect_fn ) );
-//         if ( data->get_changes_fn )
-//             rb_gc_unregister_address ( & ( data->get_changes_fn ) );
-//         if ( data->read_fn )
-//             rb_gc_unregister_address ( & ( data->read_fn ) );
-//         if ( data->sync_done_fn )
-//             rb_gc_unregister_address ( & ( data->sync_done_fn ) );
-//         if ( data->data )
-//             rb_gc_unregister_address ( & ( data->data ) );
-//     }
-//     g_free ( data );
-// }
-
 static void osync_rubymodule_objtype_sink_connect ( OSyncObjTypeSink *sink, OSyncPluginInfo *info, OSyncContext *ctx, void *data ) {
     osync_trace ( TRACE_ENTRY, "%s(%p, %p, %p, %p)", __func__, sink, info, ctx, data );
     int status;
@@ -295,6 +217,8 @@ static void osync_rubymodule_objtype_sink_connect ( OSyncObjTypeSink *sink, OSyn
 
     VALUE callback = osync_rubymodule_get_data ( sink, "connect_func" );
     VALUE ruby_data = CAST_VALUE(data);
+    assert(callback);
+    assert(ruby_data);
 
     pthread_mutex_lock ( &ruby_context_lock );
     VALUE args[4];
@@ -327,6 +251,8 @@ static void osync_rubymodule_objtype_sink_get_changes ( OSyncObjTypeSink *sink, 
 
     VALUE callback = osync_rubymodule_get_data ( sink, "get_changes_func" );
     VALUE ruby_data = data? ( VALUE ) data: Qnil;
+    assert(callback);
+    assert(ruby_data);
 
     pthread_mutex_lock ( &ruby_context_lock );
     VALUE args[5];
@@ -359,6 +285,8 @@ static void osync_rubymodule_objtype_sink_commit ( OSyncObjTypeSink *sink, OSync
     OSyncError *error = 0;
     VALUE callback = osync_rubymodule_get_data ( sink, "commit_func" );
     VALUE ruby_data = data? ( VALUE ) data: Qnil;
+    assert(callback);
+    assert(ruby_data);
 
     pthread_mutex_lock ( &ruby_context_lock );
     VALUE args[5];
@@ -391,6 +319,8 @@ static void osync_rubymodule_objtype_sink_commited_all ( OSyncObjTypeSink *sink,
     OSyncError *error = 0;
     VALUE callback = osync_rubymodule_get_data ( sink, "commited_all" );
     VALUE ruby_data = data? ( VALUE ) data: Qnil;
+    assert(callback);
+    assert(ruby_data);
 
     pthread_mutex_lock ( &ruby_context_lock );
     VALUE args[4];
@@ -422,6 +352,8 @@ static void osync_rubymodule_objtype_sink_read ( OSyncObjTypeSink *sink, OSyncPl
     OSyncError *error = 0;
     VALUE callback = osync_rubymodule_get_data ( sink, "read_func" );
     VALUE ruby_data = data? ( VALUE ) data: Qnil;
+    assert(callback);
+    assert(ruby_data);
 
     pthread_mutex_lock ( &ruby_context_lock );
     VALUE args[5];
@@ -453,8 +385,10 @@ static void osync_rubymodule_objtype_sink_sync_done ( OSyncObjTypeSink *sink, OS
     int status;
     OSyncError *error = 0;
 
-    VALUE callback = osync_rubymodule_get_data ( sink, "sync_done" );
+    VALUE callback = osync_rubymodule_get_data ( sink, "sync_done_func" );
     VALUE ruby_data = data? ( VALUE ) data: Qnil;
+    assert(callback);
+    assert(ruby_data);
 
     pthread_mutex_lock ( &ruby_context_lock );
     VALUE args[4];
@@ -487,6 +421,8 @@ static void osync_rubymodule_objtype_sink_connect_done ( OSyncObjTypeSink *sink,
 
     VALUE callback = osync_rubymodule_get_data ( sink, "connect_done" );
     VALUE ruby_data = data? ( VALUE ) data: Qnil;
+    assert(callback);
+    assert(ruby_data);
 
     pthread_mutex_lock ( &ruby_context_lock );
     VALUE args[5];
@@ -519,6 +455,8 @@ static void osync_rubymodule_objtype_sink_disconnect ( OSyncObjTypeSink *sink, O
     OSyncError *error = 0;
     VALUE callback = osync_rubymodule_get_data ( sink, "disconnect" );
     VALUE ruby_data = data? ( VALUE ) data: Qnil;
+    assert(callback);
+    assert(ruby_data);
 
     pthread_mutex_lock ( &ruby_context_lock );
     VALUE args[4];
@@ -553,6 +491,7 @@ static void *osync_rubymodule_plugin_initialize ( OSyncPlugin *plugin, OSyncPlug
     osync_trace ( TRACE_ENTRY, "%s(%p, %p, %p)", __func__, plugin, info, error );
 
     VALUE callback = osync_rubymodule_get_data ( plugin, "initialize_func" );
+    assert(callback);
 
     pthread_mutex_lock ( &ruby_context_lock );
     VALUE args[2];
@@ -568,7 +507,7 @@ static void *osync_rubymodule_plugin_initialize ( OSyncPlugin *plugin, OSyncPlug
     pthread_mutex_unlock ( &ruby_context_lock );
     osync_trace ( TRACE_EXIT, "%s: %lu", __func__, result );
 
-    return ( void* ) result;
+    return ( void* )result;
 error:
     pthread_mutex_unlock ( &ruby_context_lock );
     osync_trace ( TRACE_EXIT_ERROR, "%s: %s", __func__, osync_error_print ( error ) );
@@ -577,10 +516,11 @@ error:
 
 // SGST: add some parameters in order to free sink datas
 static void osync_rubymodule_plugin_finalize ( OSyncPlugin *plugin, void* plugin_data ) {
-    osync_trace ( TRACE_ENTRY, "%s(%p)", __func__, plugin );
+    osync_trace ( TRACE_ENTRY, "%s(%p)", __func__, plugin, plugin_data );
 
     int status;
     VALUE callback = osync_rubymodule_get_data ( plugin, "finalize_func" );
+    assert(callback);
 
     pthread_mutex_lock ( &ruby_context_lock );
     VALUE args[2];
@@ -1023,7 +963,7 @@ error:
     return FALSE;
 }
 
-void ruby_initialize();
+void rubymodule_initialize();
 
 osync_bool get_sync_info ( OSyncPluginEnv *env, OSyncError **error ) {
     int   status;
@@ -1031,7 +971,7 @@ osync_bool get_sync_info ( OSyncPluginEnv *env, OSyncError **error ) {
 
     pthread_mutex_lock ( &ruby_context_lock );
 
-    ruby_initialize();
+    rubymodule_initialize();
 
     rb_protect ( ( VALUE ( * ) ( VALUE ) ) rb_require, ( VALUE ) RUBY_BASE_FILE, &status );
     if ( status!=0 ) {
@@ -1080,7 +1020,7 @@ osync_bool get_format_info ( OSyncFormatEnv *env, OSyncError **error ) {
 
     pthread_mutex_lock ( &ruby_context_lock );
 
-    ruby_initialize();
+    rubymodule_initialize();
 
     rb_protect ( ( VALUE ( * ) ( VALUE ) ) rb_require, ( VALUE ) RUBY_BASE_FILE, &status );
     if ( status!=0 ) {
@@ -1129,7 +1069,7 @@ osync_bool get_conversion_info ( OSyncFormatEnv *env, OSyncError **error ) {
 
     pthread_mutex_lock ( &ruby_context_lock );
 
-    ruby_initialize();
+    rubymodule_initialize();
 
     rb_protect ( ( VALUE ( * ) ( VALUE ) ) rb_require, ( VALUE ) RUBY_BASE_FILE, &status );
     if ( status!=0 ) {
@@ -2077,7 +2017,7 @@ A module function.
 //   return Qnil;
 // }
 
-void ruby_initialize() {
+void rubymodule_initialize() {
     if ( ruby_initialized ) {
         return;
     }
@@ -2137,9 +2077,10 @@ void ruby_initialize() {
     rubymodule_data = g_hash_table_new_full ( g_direct_hash, g_direct_equal, NULL, ( GDestroyNotify ) g_hash_table_destroy );
 }
 
-void ruby_finalized() {
+void rubymodule_finalized() {
     g_hash_table_destroy ( rubymodule_data );
-
+    ruby_finalize();
+    rubymodule_initialize();
 }
 
 int get_version ( void ) {

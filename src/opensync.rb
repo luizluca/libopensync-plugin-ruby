@@ -9,7 +9,6 @@
 # TODO: defaults for plugins!
 #
 
-
 # http://opensync.org/wiki/glossary
 # http://metaeditor.sourceforge.net/embed/#id2842525
 # http://www.ruby-doc.org/docs/ProgrammingRuby/html/ext_ruby.html
@@ -23,8 +22,11 @@ require "thread"
 require "set"
 require "pathname"
 
-$trace=true
+# GC.disable
+#$stderr.puts GC.count
+#GC.stress=true
 
+$trace=true
 if $trace
   @untraced_classes=Set.new
   @untraced_classes.merge(Object.constants.collect {|sym| Object.const_get(sym) }.select{|cons| cons.kind_of? Module })
@@ -77,12 +79,13 @@ module Opensync
 	    end
 	    load_files(pathname) do
 		|obj|
-		$stderr.puts "Calling #{obj}"
+		#$stderr.puts "Calling #{obj}"
 		if obj.kind_of? OSyncObject or (obj.kind_of? Class and obj.ancestors.include?(OSyncObject))
 		    obj.get_sync_info(env)
 		else
 		    obj.get_sync_info(_env)
 		end
+		#$stderr.puts "Done #{obj}"
 	    end
 	    true
         end
@@ -531,7 +534,9 @@ end
 #Opensync::OSyncObject.unmapped_methods.to_a.each {|method| warn("Atention! Method #{method} not mapped!") }
 
 if $trace
-  set_trace_func proc { |event, file, line, id, binding, klass|
+  @untraced_classes << Opensync::OSyncObject
+  set_trace_func proc {
+    |event, file, line, id, binding, klass|
     next if not Opensync::osync_trace_is_enabled
     next if not klass or @untraced_classes.include?(klass)
 
