@@ -53,13 +53,13 @@
 RUBY_GLOBAL_SETUP
 
 /* This mutex avoids concurrent use of ruby context (which is prohibit) */
-static pthread_mutex_t ruby_context_lock = PTHREAD_MUTEX_INITIALIZER;
-static osync_bool      ruby_initialized = FALSE;
-static osync_bool      ruby_started = FALSE;
-static osync_bool      ruby_running = FALSE;
-pthread_cond_t fcall_free = PTHREAD_COND_INITIALIZER;
-pthread_cond_t fcall_requested = PTHREAD_COND_INITIALIZER;
-pthread_cond_t fcall_returned = PTHREAD_COND_INITIALIZER;
+static pthread_mutex_t 	ruby_context_lock = PTHREAD_MUTEX_INITIALIZER;
+// static osync_bool	ruby_initialized = FALSE;
+static osync_bool      	ruby_started = FALSE;
+static osync_bool      	ruby_running = FALSE;
+pthread_cond_t 		fcall_free = PTHREAD_COND_INITIALIZER;
+pthread_cond_t 		fcall_requested = PTHREAD_COND_INITIALIZER;
+pthread_cond_t 		fcall_returned = PTHREAD_COND_INITIALIZER;
 struct fcall_args_t {
    VALUE (*func)(VALUE);
    VALUE arg;
@@ -146,15 +146,12 @@ VALUE rb_fcall2_protected ( VALUE recv, const char* method, int argc, VALUE* arg
 static char * osync_rubymodule_error_bt ( char* file, const char* func, int line ) {
     VALUE message;
     int state;
-    message = rb_protect_sync (( VALUE ( * ) ( VALUE ) ) rb_eval_string, ( VALUE ) ( "bt=$!.backtrace; bt[0]=\"#{bt[0]}: #{$!} (#{$!.class})\"; bt.join('\n')" ),&state );
+    message = rb_protect (( VALUE ( * ) ( VALUE ) ) rb_eval_string, ( VALUE ) ( "bt=$!.backtrace; bt[0]=\"#{bt[0]}: #{$!} (#{$!.class})\"; bt.join('\n')" ),&state );
     if ( state!=0 ) {
         message = Qnil;
     }
     return RSTRING_PTR ( message );
 }
-
-GHashTable *rubymodule_data;
-static pthread_mutex_t rubymodule_data_lock = PTHREAD_MUTEX_INITIALIZER;
 
 void unregister_and_free(gpointer data) {
     rb_gc_unregister_address(data);
@@ -961,13 +958,18 @@ error:
     return FALSE;
 }
 
-void rubymodule_ruby_start();
+void rubymodule_ruby_start(int *error);
 
 osync_bool get_sync_info ( OSyncPluginEnv *env, OSyncError **error ) {
     int   status;
     osync_trace ( TRACE_ENTRY, "%s(%p)", __func__, env );
 
-    rubymodule_ruby_start();
+    rubymodule_ruby_start(&status);
+    if ( status!=0 ) {
+        osync_error_set ( error, OSYNC_ERROR_GENERIC, "Failed to initialize ruby!\n%s",
+                          osync_rubymodule_error_bt ( __FILE__, __func__,__LINE__ ) );
+        goto error;
+    }
 
     rb_protect_sync ( (VALUE ( * ) ( VALUE ) )rb_require, ( VALUE ) RUBY_BASE_FILE, &status );
     if ( status!=0 ) {
@@ -1008,12 +1010,16 @@ error:
     return FALSE;
 }
 
-osync_bool get_format_info ( OSyncFormatEnv *env, OSyncError **error ) {
+osync_bool get_format_info2 ( OSyncFormatEnv *env, OSyncError **error ) {
     int   status;
     osync_trace ( TRACE_ENTRY, "%s(%p)", __func__, env );
 
-
-    rubymodule_ruby_start();
+    rubymodule_ruby_start(&status);
+    if ( status!=0 ) {
+        osync_error_set ( error, OSYNC_ERROR_GENERIC, "Failed to initialize ruby!\n%s",
+                          osync_rubymodule_error_bt ( __FILE__, __func__,__LINE__ ) );
+        goto error;
+    }
 
     rb_protect_sync ( ( VALUE ( * ) ( VALUE ) ) rb_require, ( VALUE ) RUBY_BASE_FILE, &status );
     if ( status!=0 ) {
@@ -1054,12 +1060,16 @@ error:
     return FALSE;
 }
 
-osync_bool get_conversion_info ( OSyncFormatEnv *env, OSyncError **error ) {
+osync_bool get_conversion_info2 ( OSyncFormatEnv *env, OSyncError **error ) {
     int   status;
     osync_trace ( TRACE_ENTRY, "%s(%p)", __func__, env );
 
-
-    rubymodule_ruby_start();
+    rubymodule_ruby_start(&status);
+    if ( status!=0 ) {
+        osync_error_set ( error, OSYNC_ERROR_GENERIC, "Failed to initialize ruby!\n%s",
+                          osync_rubymodule_error_bt ( __FILE__, __func__,__LINE__ ) );
+        goto error;
+    }
 
     rb_protect_sync ( ( VALUE ( * ) ( VALUE ) ) rb_require, ( VALUE ) RUBY_BASE_FILE, &status );
     if ( status!=0 ) {
@@ -1909,17 +1919,36 @@ A module function.
 //   return Qnil;
 // }
 
-static pthread_t ruby_thread;
-static pthread_attr_t attr;
+static VALUE ruby_thread = Qnil;
 
-void *rubymodule_ruby_thread(void *threadid) {
-    int error;
-
+VALUE rb_osync_ruby_thread(int argc, VALUE *argv, VALUE self) {
+    if (argc > 0) {
+      rb_raise(rb_eArgError, "wrong # of arguments(%d for 0)",argc); SWIG_fail;
+    }
+    fprintf(stderr,"Trying to mutex!\n");
     pthread_mutex_lock ( &ruby_context_lock);
-    RUBY_INIT_STACK;
+    ruby_running=TRUE;
+    fprintf(stderr,"Doors are open!\n");
+    pthread_cond_signal(&fcall_free);
+    while (ruby_running) {
+	fprintf(stderr,"Waiting something!\n");
+	pthread_cond_wait(&fcall_requested, &ruby_context_lock);
+	fprintf(stderr,"Calling %p(...)!\n", fcall_args.func);
+	fcall_args.result = rb_protect(fcall_args.func, fcall_args.arg, fcall_args.error);
+	fprintf(stderr,"Returning!\n");
+	pthread_cond_signal(&fcall_returned);
+    }
+    pthread_mutex_unlock ( &ruby_context_lock);
+    return Qtrue;
+fail:
+    return Qnil;
+}
+
+void rubymodule_ruby_initialize() {
     ruby_init();
     ruby_init_loadpath();
-    //Init_prelude();
+    // Needed for Mutex.synchronize (not present in ruby.h)
+    Init_prelude();
     ruby_script ( RUBY_SCRIPTNAME );
 
     // SWIG initialize (include the module)
@@ -1967,111 +1996,69 @@ void *rubymodule_ruby_thread(void *threadid) {
 
     rb_define_const(mOpensync, "OPENSYNC_RUBYPLUGIN_DIR", SWIG_FromCharPtr (OPENSYNC_RUBYPLUGIN_DIR));
     rb_define_const(mOpensync, "OPENSYNC_RUBYFORMATS_DIR", SWIG_FromCharPtr (OPENSYNC_RUBYFORMATS_DIR));
+
+    rb_define_module_function ( mOpensync, "ruby_thread", rb_osync_ruby_thread, -1 );
+
     rubymodule_data = g_hash_table_new_full ( g_direct_hash, g_direct_equal, NULL, ( GDestroyNotify ) g_hash_table_destroy );
+}
 
-    rb_protect ( (VALUE ( * ) ( VALUE ) )rb_require, ( VALUE ) RUBY_BASE_FILE, &error );
-
-    ruby_running=TRUE;
-    fprintf(stderr,"Doors are open!\n");
-    pthread_cond_signal(&fcall_free);
-    while (ruby_running) {
-	fprintf(stderr,"Waiting something!\n");
-	pthread_cond_wait(&fcall_requested, &ruby_context_lock);
-	fprintf(stderr,"Calling %p(...)!\n", fcall_args.func);
-	fcall_args.result = rb_protect(fcall_args.func, fcall_args.arg, &error);
-	fprintf(stderr,"Returning!\n");
-	pthread_cond_signal(&fcall_returned);
-    }
+void rubymodule_ruby_finalized() {
     g_hash_table_destroy ( rubymodule_data );
     ruby_finalize();
-    pthread_mutex_unlock ( &ruby_context_lock);
-    pthread_exit(0);
+    rubymodule_ruby_initialize();
 }
 
-void rubymodule_ruby_start() {
+/* this initializes ruby and create a ruby thread as
+   pthreads are not supposed to call ruby. Ruby thread calls back
+   rb_osync_ruby_thread */
+void rubymodule_ruby_start(int *error) {
     pthread_mutex_lock ( &ruby_context_lock);
     if (! ruby_started ) {
-	int rc;
-	pthread_attr_t attr;
-	pthread_attr_init(&attr);
-	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-	pthread_attr_setstacksize (&attr, 100*1000*1000);
-	rc = pthread_create(&ruby_thread, NULL, rubymodule_ruby_thread, NULL);
-	if (rc){
-	    printf("ERROR; return code from pthread_create() is %d\n", rc);
-	    exit(-1);
+	// TODO: ensure main thread or fail
+	RUBY_INIT_STACK;
+	VALUE thread = Qnil;
+// 	VALUE thread_body = Qnil;
+	rubymodule_ruby_initialize();
+
+	if (!ruby_native_thread_p()) {
+	    // TODO MSG
+	    goto fail;
 	}
-	pthread_attr_destroy(&attr);
-        ruby_started=TRUE;
+
+// 	thread_body = rb_eval_string_protect("Proc.new { $stderr.puts 'starting thread'; Opensync.ruby_thread }", error);
+// 	if (error && *error!=0) {
+// 	    goto fail;
+// 	}
+//
+	thread = rb_eval_string_protect("Thread.new { $stderr.puts 'starting thread'; Opensync.ruby_thread; }", error);
+
+// 	// Creates a ruby thread in ruby world that callback C world rb_osync_ruby_thread
+// 	rb_eval_string_protect("require 'thread'; $mutex = Mutex.new; resource = ConditionVariable.new;"
+// 	"th=Thread.new { $stderr.puts 'starting thread'; mutex.synchronize { resource.signal }; Opensync.ruby_thread; };"
+// 	"$stderr.puts 'OK3?', th.status; mutex.synchronize { resource.wait(mutex)}; $stderr.puts 'OK4?' ", error);
+
+// 	rb_eval_string_protect("$stderr.puts 'OK5?'; Opensync.ruby_thread;  $stderr.puts 'OK6?'", error);
+	if (error && *error!=0) {
+	    // TODO MSG
+	    goto fail;
+	}
+	ruby_started=TRUE;
     }
+    goto exit;
+fail:
+    ruby_started=FALSE;
+    // This segfaults
+    //rubymodule_ruby_finalized();
+exit:
     pthread_mutex_unlock ( &ruby_context_lock);
 }
 
-// void rubymodule_ruby_initialize() {
-//     if ( ruby_initialized ) {
-//         return;
-//     }
-//     //pthread_create();
-//     ruby_initialized=TRUE;
-//
-//     /* Initialize Ruby env */
-//     RUBY_INIT_STACK;
-//     ruby_init();
-//     ruby_init_loadpath();
-//     ruby_script ( RUBY_SCRIPTNAME );
-//     // SWIG initialize (include the module)
-//     Init_opensync();
-//
-//     // Include custom made methods (should it be inside opensync.i? I don't think so)
-//     //rb_define_module_function ( mOpensync, "get_data", rb_osync_rubymodule_get_data, -1 );
-//     //rb_define_module_function ( mOpensync, "set_data", rb_osync_rubymodule_set_data, -1 );
-//
-//     // Those replace set/get_*data and set_*_func
-//     rb_define_module_function ( mOpensync, "osync_rubymodule_get_data", rb_osync_rubymodule_get_data, -1 );
-//     rb_define_module_function ( mOpensync, "osync_rubymodule_set_data", rb_osync_rubymodule_set_data, -1 );
-//     rb_define_module_function ( mOpensync, "osync_rubymodule_clean_data", rb_osync_rubymodule_clean_data, -1 );
-//
-//     rb_define_module_function ( mOpensync, "osync_plugin_set_initialize_func", rb_osync_plugin_set_initialize_func, -1 );
-//     rb_define_module_function ( mOpensync, "osync_plugin_set_finalize_func", rb_osync_plugin_set_finalize_func, -1 );
-//     rb_define_module_function ( mOpensync, "osync_plugin_set_discover_func", rb_osync_plugin_set_discover_func, -1 );
-//
-//     rb_define_module_function ( mOpensync, "osync_objtype_sink_set_userdata", rb_osync_rubymodule_objtype_sink_set_userdata, -1 );
-//     rb_define_module_function ( mOpensync, "osync_objtype_sink_set_connect_func", rb_osync_rubymodule_objtype_sink_set_connect_func, -1 );
-//     rb_define_module_function ( mOpensync, "osync_objtype_sink_set_get_changes_func", rb_osync_rubymodule_objtype_sink_set_get_changes_func, -1 );
-//     rb_define_module_function ( mOpensync, "osync_objtype_sink_set_commit_func", rb_osync_rubymodule_objtype_sink_set_commit_func, -1 );
-//     rb_define_module_function ( mOpensync, "osync_objtype_sink_set_committed_all_func", rb_osync_rubymodule_objtype_sink_set_committed_all_func, -1 );
-//     rb_define_module_function ( mOpensync, "osync_objtype_sink_set_read_func", rb_osync_rubymodule_objtype_sink_set_read_func, -1 );
-//     rb_define_module_function ( mOpensync, "osync_objtype_sink_set_sync_done_func", rb_osync_rubymodule_objtype_sink_set_sync_done_func, -1 );
-//     rb_define_module_function ( mOpensync, "osync_objtype_sink_set_connect_done_func", rb_osync_rubymodule_objtype_sink_set_connect_done_func, -1 );
-//     rb_define_module_function ( mOpensync, "osync_objtype_sink_set_disconnect_func", rb_osync_rubymodule_objtype_sink_set_disconnect_func, -1 );
-//
-// //     rb_define_module_function ( mOpensync, "osync_objformat_get_data",  rb_osync_objformat_get_data, -1 );
-// //     rb_define_module_function ( mOpensync, "osync_objformat_set_data" , rb_osync_objformat_set_data, -1 );
-//     rb_define_module_function ( mOpensync, "osync_objformat_set_initialize_func", rb_osync_rubymodule_objformat_set_initialize_func, -1 );
-//     rb_define_module_function ( mOpensync, "osync_objformat_set_finalize_func", rb_osync_rubymodule_objformat_set_finalize_func, -1 );
-//     rb_define_module_function ( mOpensync, "osync_objformat_set_compare_func", rb_osync_rubymodule_objformat_set_compare_func, -1 );
-//     rb_define_module_function ( mOpensync, "osync_objformat_set_destroy_func", rb_osync_rubymodule_objformat_set_destroy_func, -1 );
-//     rb_define_module_function ( mOpensync, "osync_objformat_set_copy_func", rb_osync_rubymodule_objformat_set_copy_func, -1 );
-//     rb_define_module_function ( mOpensync, "osync_objformat_set_duplicate_func", rb_osync_rubymodule_objformat_set_duplicate_func, -1 );
-//     rb_define_module_function ( mOpensync, "osync_objformat_set_create_func", rb_osync_rubymodule_objformat_set_create_func, -1 );
-//     rb_define_module_function ( mOpensync, "osync_objformat_set_print_func", rb_osync_rubymodule_objformat_set_print_func, -1 );
-//     rb_define_module_function ( mOpensync, "osync_objformat_set_revision_func", rb_osync_rubymodule_objformat_set_revision_func, -1 );
-//     rb_define_module_function ( mOpensync, "osync_objformat_set_marshal_func", rb_osync_rubymodule_objformat_set_marshal_func, -1 );
-//     rb_define_module_function ( mOpensync, "osync_objformat_set_demarshal_func", rb_osync_rubymodule_objformat_set_demarshal_func, -1 );
-//     rb_define_module_function ( mOpensync, "osync_objformat_set_validate_func", rb_osync_rubymodule_objformat_set_validate_func, -1 );
-//
-//     rb_define_module_function ( mOpensync, "osync_converter_new", rb_osync_converter_new, -1 );
-//
-//     rb_define_const(mOpensync, "OPENSYNC_RUBYPLUGIN_DIR", SWIG_FromCharPtr (OPENSYNC_RUBYPLUGIN_DIR));
-//     rb_define_const(mOpensync, "OPENSYNC_RUBYFORMATS_DIR", SWIG_FromCharPtr (OPENSYNC_RUBYFORMATS_DIR));
-//     rubymodule_data = g_hash_table_new_full ( g_direct_hash, g_direct_equal, NULL, ( GDestroyNotify ) g_hash_table_destroy );
-// }
-//
-// void rubymodule_ruby_finalized() {
-//     g_hash_table_destroy ( rubymodule_data );
-//     ruby_finalize();
-//     rubymodule_ruby_initialize();
-// }
+// Never used :) Maybe this could be called if no plugin/format/converter is found
+void rubymodule_ruby_stop() {
+    ruby_started = FALSE;
+    // TODO: call something like NOP to let the tread die
+    rubymodule_ruby_finalized();
+}
 
 int get_version ( void ) {
     return 1;
