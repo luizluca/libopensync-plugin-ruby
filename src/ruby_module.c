@@ -56,9 +56,13 @@ RUBY_GLOBAL_SETUP
 static pthread_mutex_t ruby_context_lock = PTHREAD_MUTEX_INITIALIZER;
 static osync_bool      ruby_initialized = FALSE;
 
-void *get_sp() {
-    asm("movl %esp,%eax");
-}
+// void *get_sp32() {
+//     asm("movl %esp,%eax");
+// }
+//
+// void *get_sp() {
+//     asm("movl %rsp,%rax");
+// }
 
 // thread detached
 // pthread_once_t once_control = PTHREAD_ONCE_INIT
@@ -68,10 +72,10 @@ void *get_sp() {
 VALUE rb_fcall2_wrapper ( VALUE* params ) {
     //fprintf(stderr,"run %d.%s(...)\n",(uint)params[0],(char*)params[1]);
     VALUE result;
-//     RUBY_INIT_STACK;
+//    RUBY_INIT_STACK;
     pthread_t this_thread = pthread_self();
     char  *name;
-    fprintf(stderr,"STACK: 0x%p Thread: %lu ", get_sp(), this_thread);
+    fprintf(stderr,"STACK: %p Thread: %lu ", &result, this_thread);
     //name = RSTRING_PTR(rb_funcall2 (params[0], rb_intern("to_s"), 0,0));
     name = RSTRING_PTR(rb_funcall2 (params[0], rb_intern("inspect"), 0,0));
     fprintf(stderr,"Calling %s.%s()...",name, ( char* )params[1]);
@@ -106,6 +110,11 @@ static char * osync_rubymodule_error_bt ( char* file, const char* func, int line
 GHashTable *rubymodule_data;
 static pthread_mutex_t rubymodule_data_lock = PTHREAD_MUTEX_INITIALIZER;
 
+void unregister_and_free(gpointer data) {
+    rb_gc_unregister_address(data);
+    free(data);
+};
+
 void osync_rubymodule_set_data ( void* ptr, char const *key, VALUE data ) {
     GHashTable *ptr_data;
     VALUE saved_data;
@@ -116,7 +125,7 @@ void osync_rubymodule_set_data ( void* ptr, char const *key, VALUE data ) {
 
     ptr_data = ( GHashTable* ) g_hash_table_lookup ( rubymodule_data, ptr );
     if ( ptr_data == NULL ) {
-        ptr_data = g_hash_table_new_full ( &g_str_hash, &g_str_equal, NULL, ( GDestroyNotify ) rb_gc_unregister_address );
+        ptr_data = g_hash_table_new_full ( &g_str_hash, &g_str_equal, NULL, &unregister_and_free );
         g_hash_table_insert ( rubymodule_data, ptr, ptr_data );
     }
 
@@ -125,10 +134,10 @@ void osync_rubymodule_set_data ( void* ptr, char const *key, VALUE data ) {
 
     if ( data != Qnil ) {
         //rb_gc_register_address ( &data );
-	VALUE *pdata = malloc(sizeof(VALUE));
-	*pdata = data;
-	g_hash_table_insert ( ptr_data, ( char* ) key, pdata );
-	rb_gc_register_address ( pdata );
+        VALUE *pdata = malloc(sizeof(VALUE));
+        *pdata = data;
+        g_hash_table_insert ( ptr_data, ( char* ) key, pdata );
+        rb_gc_register_address ( pdata );
     }
 
     pthread_mutex_unlock ( &rubymodule_data_lock );
@@ -225,6 +234,7 @@ fail:
 static void free_plugin_data ( VALUE *data ) {
     // I guess gc will free this data
     rb_gc_unregister_address ( data );
+    free(data);
 }
 
 static void osync_rubymodule_objtype_sink_connect ( OSyncObjTypeSink *sink, OSyncPluginInfo *info, OSyncContext *ctx, void *data ) {
@@ -537,8 +547,10 @@ static void osync_rubymodule_plugin_finalize ( OSyncPlugin *plugin, void* plugin
     	  osync_rubymodule_error_bt(__FILE__, __func__,__LINE__));
     goto error;
     } */
-    if (plugin_data)
-      rb_gc_unregister_address(plugin_data);
+    if (plugin_data) {
+        rb_gc_unregister_address(plugin_data);
+	free(plugin_data);
+    }
     pthread_mutex_unlock ( &ruby_context_lock );
 
     osync_trace ( TRACE_EXIT, "%s", __func__ );
@@ -643,8 +655,10 @@ static osync_bool osync_rubymodule_objformat_finalize ( OSyncObjFormat *format, 
 
     // Should I need this (and ruby unref)?
     //format_data->data=NULL;
-    if (user_data)
-      rb_gc_unregister_address(user_data);
+    if (user_data) {
+        rb_gc_unregister_address(user_data);
+	free(user_data);
+    }
 
     pthread_mutex_unlock ( &ruby_context_lock );
     osync_trace ( TRACE_EXIT, "%s: %i", __func__, TRUE );
@@ -1122,37 +1136,11 @@ error:
 
 
 /** Plugin */
-
-// VALUE
-// rb_osync_plugin_get_data ( int argc, VALUE *argv, VALUE self ) {
-//     OSyncPlugin *arg1 = ( OSyncPlugin * ) 0 ;
-//     void *argp1 = 0 ;
-//     int res1 = 0 ;
-//     VALUE vresult = Qnil;
-//
-//     if ( ( argc < 1 ) || ( argc > 1 ) ) {
-//         rb_raise ( rb_eArgError, "wrong # of arguments(%d for 1)",argc );
-//         SWIG_fail;
-//     }
-//     res1 = SWIG_ConvertPtr ( argv[0], &argp1,SWIGTYPE_p_OSyncPlugin, 0 |  0 );
-//     if ( !SWIG_IsOK ( res1 ) ) {
-//         SWIG_exception_fail ( SWIG_ArgError ( res1 ), Ruby_Format_TypeError ( "", "OSyncPlugin *","osync_plugin_get_data", 1, argv[0] ) );
-//     }
-//     arg1 = ( OSyncPlugin * ) ( argp1 );
-//     vresult = ( VALUE ) osync_plugin_get_data ( arg1 );
-//     if ( !vresult )
-//         vresult=Qnil;
-//     return vresult;
-// fail:
-//     return Qnil;
-// }
-
-VALUE
-rb_osync_plugin_set_data ( int argc, VALUE *argv, VALUE self ) {
+VALUE rb_osync_plugin_set_data ( int argc, VALUE *argv, VALUE self ) {
     OSyncPlugin *arg1 = ( OSyncPlugin * ) 0 ;
     void *argp1 = 0 ;
     int res1 = 0 ;
-    VALUE data = 0 ;
+    VALUE *data = 0 ;
 
     if ( ( argc < 2 ) || ( argc > 2 ) ) {
         rb_raise ( rb_eArgError, "wrong # of arguments(%d for 2)",argc );
@@ -1164,20 +1152,24 @@ rb_osync_plugin_set_data ( int argc, VALUE *argv, VALUE self ) {
     }
     arg1 = ( OSyncPlugin * ) ( argp1 );
 
-    data = ( VALUE ) osync_plugin_get_data ( arg1 );
-    if ( data )
-        rb_gc_unregister_address ( &data );
-
-    osync_plugin_set_data ( arg1, ( void* ) data );
-    rb_gc_register_address ( &data );
-
+    data = ( VALUE* ) osync_plugin_get_data ( arg1 );
+    if ( data ) {
+        rb_gc_unregister_address ( data );
+	free(data);
+    }
+    data = NULL;
+    if (argv[1]!=Qnil) {
+	data = malloc(sizeof(VALUE));
+	*data = argv[1];
+	rb_gc_register_address ( data );
+    }
+    osync_plugin_set_data ( arg1, data );
     return Qnil;
 fail:
     return Qnil;
 }
 
-VALUE
-rb_osync_plugin_set_initialize_func ( int argc, VALUE *argv, VALUE self ) {
+VALUE rb_osync_plugin_set_initialize_func ( int argc, VALUE *argv, VALUE self ) {
     OSyncPlugin *arg1 = ( OSyncPlugin * ) 0 ;
     void *argp1 = 0 ;
     int res1 = 0 ;
@@ -1200,8 +1192,7 @@ fail:
     return Qnil;
 }
 
-VALUE
-rb_osync_plugin_set_finalize_func ( int argc, VALUE *argv, VALUE self ) {
+VALUE rb_osync_plugin_set_finalize_func ( int argc, VALUE *argv, VALUE self ) {
     OSyncPlugin *arg1 = ( OSyncPlugin * ) 0 ;
     void *argp1 = 0 ;
     int res1 = 0 ;
@@ -1222,8 +1213,7 @@ fail:
     return Qnil;
 }
 
-VALUE
-rb_osync_plugin_set_discover_func ( int argc, VALUE *argv, VALUE self ) {
+VALUE rb_osync_plugin_set_discover_func ( int argc, VALUE *argv, VALUE self ) {
     OSyncPlugin *arg1 = ( OSyncPlugin * ) 0 ;
     void *argp1 = 0 ;
     int res1 = 0 ;
@@ -1248,8 +1238,7 @@ fail:
 
 /** ObjectType Sinks */
 
-VALUE
-rb_osync_rubymodule_objtype_sink_get_userdata ( int argc, VALUE *argv, VALUE self ) {
+VALUE rb_osync_rubymodule_objtype_sink_get_userdata ( int argc, VALUE *argv, VALUE self ) {
     OSyncObjTypeSink *arg1 = ( OSyncObjTypeSink * ) 0 ;
     void *argp1 = 0 ;
     int res1 = 0 ;
@@ -1273,8 +1262,7 @@ fail:
     return Qnil;
 }
 
-VALUE
-rb_osync_rubymodule_objtype_sink_set_userdata ( int argc, VALUE *argv, VALUE self ) {
+VALUE rb_osync_rubymodule_objtype_sink_set_userdata ( int argc, VALUE *argv, VALUE self ) {
     OSyncObjTypeSink *arg1 = ( OSyncObjTypeSink * ) 0 ;
     void *argp1 = 0 ;
     int res1 = 0 ;
@@ -1290,19 +1278,23 @@ rb_osync_rubymodule_objtype_sink_set_userdata ( int argc, VALUE *argv, VALUE sel
     }
     arg1 = ( OSyncObjTypeSink * ) ( argp1 );
     data = osync_objtype_sink_get_userdata ( arg1 );
-    if ( data )
+    if ( data ) {
         rb_gc_unregister_address ( data );
-    data=malloc(sizeof(VALUE));
-    *data=argv[1];
+	free(data);
+    }
+    data = NULL;
+    if (argv[1]!=Qnil) {
+	data = malloc(sizeof(VALUE));
+	*data = argv[1];
+	rb_gc_register_address ( data );
+    }
     osync_objtype_sink_set_userdata ( arg1, data);
-    rb_gc_register_address ( data );
     return Qnil;
 fail:
     return Qnil;
 }
 
-VALUE
-rb_osync_rubymodule_objtype_sink_set_read_func ( int argc, VALUE *argv, VALUE self ) {
+VALUE rb_osync_rubymodule_objtype_sink_set_read_func ( int argc, VALUE *argv, VALUE self ) {
     OSyncObjTypeSink *arg1 = ( OSyncObjTypeSink * ) 0 ;
     void *argp1 = 0 ;
     int res1 = 0 ;
@@ -1323,8 +1315,7 @@ fail:
     return Qnil;
 }
 
-VALUE
-rb_osync_rubymodule_objtype_sink_set_sync_done_func ( int argc, VALUE *argv, VALUE self ) {
+VALUE rb_osync_rubymodule_objtype_sink_set_sync_done_func ( int argc, VALUE *argv, VALUE self ) {
     OSyncObjTypeSink *arg1 = ( OSyncObjTypeSink * ) 0 ;
     void *argp1 = 0 ;
     int res1 = 0 ;
@@ -1345,8 +1336,7 @@ fail:
     return Qnil;
 }
 
-VALUE
-rb_osync_rubymodule_objtype_sink_set_connect_done_func ( int argc, VALUE *argv, VALUE self ) {
+VALUE rb_osync_rubymodule_objtype_sink_set_connect_done_func ( int argc, VALUE *argv, VALUE self ) {
     OSyncObjTypeSink *arg1 = ( OSyncObjTypeSink * ) 0 ;
     void *argp1 = 0 ;
     int res1 = 0 ;
@@ -1367,8 +1357,7 @@ fail:
     return Qnil;
 }
 
-VALUE
-rb_osync_rubymodule_objtype_sink_set_disconnect_func ( int argc, VALUE *argv, VALUE self ) {
+VALUE rb_osync_rubymodule_objtype_sink_set_disconnect_func ( int argc, VALUE *argv, VALUE self ) {
     OSyncObjTypeSink *arg1 = ( OSyncObjTypeSink * ) 0 ;
     void *argp1 = 0 ;
     int res1 = 0 ;
@@ -1389,8 +1378,7 @@ fail:
     return Qnil;
 }
 
-VALUE
-rb_osync_rubymodule_objtype_sink_set_connect_func ( int argc, VALUE *argv, VALUE self ) {
+VALUE rb_osync_rubymodule_objtype_sink_set_connect_func ( int argc, VALUE *argv, VALUE self ) {
     OSyncObjTypeSink *arg1 = ( OSyncObjTypeSink * ) 0 ;
     OSyncSinkConnectFn arg2 = ( OSyncSinkConnectFn ) 0 ;
     void *argp1 = 0 ;
@@ -1412,8 +1400,7 @@ fail:
     return Qnil;
 }
 
-VALUE
-rb_osync_rubymodule_objtype_sink_set_get_changes_func ( int argc, VALUE *argv, VALUE self ) {
+VALUE rb_osync_rubymodule_objtype_sink_set_get_changes_func ( int argc, VALUE *argv, VALUE self ) {
     OSyncObjTypeSink *arg1 = ( OSyncObjTypeSink * ) 0 ;
     void *argp1 = 0 ;
     int res1 = 0 ;
@@ -1434,8 +1421,7 @@ fail:
     return Qnil;
 }
 
-VALUE
-rb_osync_rubymodule_objtype_sink_set_commit_func ( int argc, VALUE *argv, VALUE self ) {
+VALUE rb_osync_rubymodule_objtype_sink_set_commit_func ( int argc, VALUE *argv, VALUE self ) {
     OSyncObjTypeSink *arg1 = ( OSyncObjTypeSink * ) 0 ;
     void *argp1 = 0 ;
     int res1 = 0 ;
@@ -1456,8 +1442,7 @@ fail:
     return Qnil;
 }
 
-VALUE
-rb_osync_rubymodule_objtype_sink_set_committed_all_func ( int argc, VALUE *argv, VALUE self ) {
+VALUE rb_osync_rubymodule_objtype_sink_set_committed_all_func ( int argc, VALUE *argv, VALUE self ) {
     OSyncObjTypeSink *arg1 = ( OSyncObjTypeSink * ) 0 ;
     void *argp1 = 0 ;
     int res1 = 0 ;
@@ -1480,62 +1465,7 @@ fail:
 
 /** ObjectFormat */
 
-// VALUE
-// rb_osync_objformat_get_data ( int argc, VALUE *argv, VALUE self )
-// {
-//     OSyncObjFormat *arg1 = ( OSyncObjFormat * ) 0 ;
-//     void *argp1 = 0 ;
-//     int res1 = 0 ;
-//     VALUE vresult = Qnil;
-//
-//     if ( ( argc < 1 ) || ( argc > 1 ) ) {
-//         rb_raise ( rb_eArgError, "wrong # of arguments(%d for 1)",argc );
-//         SWIG_fail;
-//     }
-//     res1 = SWIG_ConvertPtr ( argv[0], &argp1,SWIGTYPE_p_OSyncObjFormat, 0 |  0 );
-//     if ( !SWIG_IsOK ( res1 ) ) {
-//         SWIG_exception_fail ( SWIG_ArgError ( res1 ), Ruby_Format_TypeError ( "", "OSyncObjFormat *","osync_objformat_get_data", 1, argv[0] ) );
-//     }
-//     arg1 = ( OSyncObjFormat * ) ( argp1 );
-//     vresult = (VALUE) osync_objformat_get_data( arg1 );
-//     if ( !vresult )
-//         vresult=Qnil;
-//     return vresult;
-// fail:
-//     return Qnil;
-// }
-
-// VALUE
-// rb_osync_objformat_set_data ( int argc, VALUE *argv, VALUE self )
-// {
-//     OSyncObjFormat *arg1 = ( OSyncObjFormat * ) 0 ;
-//     void *argp1 = 0 ;
-//     int res1 = 0 ;
-//     VALUE data;
-//
-//     if ( ( argc < 2 ) || ( argc > 2 ) ) {
-//         rb_raise ( rb_eArgError, "wrong # of arguments(%d for 2)",argc );
-//         SWIG_fail;
-//     }
-//     res1 = SWIG_ConvertPtr ( argv[0], &argp1,SWIGTYPE_p_OSyncObjFormat, 0 |  0 );
-//     if ( !SWIG_IsOK ( res1 ) ) {
-//         SWIG_exception_fail ( SWIG_ArgError ( res1 ), Ruby_Format_TypeError ( "", "OSyncObjFormat *","osync_objformat_set_data", 1, argv[0] ) );
-//     }
-//     arg1 = ( OSyncObjFormat * ) ( argp1 );
-//
-//     data = ( VALUE ) osync_objformat_get_data ( arg1 );
-//     if ( data )
-//         rb_gc_unregister_address ( &data );
-//
-//     osync_plugin_set_data(data);
-//     rb_gc_register_address ( &data );
-//     return Qnil;
-// fail:
-//     return Qnil;
-// }
-
-VALUE
-rb_osync_rubymodule_objformat_set_initialize_func ( int argc, VALUE *argv, VALUE self ) {
+VALUE rb_osync_rubymodule_objformat_set_initialize_func ( int argc, VALUE *argv, VALUE self ) {
     OSyncObjFormat *arg1 = ( OSyncObjFormat * ) 0 ;
     void *argp1 = 0 ;
     int res1 = 0 ;
@@ -1556,8 +1486,7 @@ fail:
     return Qnil;
 }
 
-VALUE
-rb_osync_rubymodule_objformat_set_finalize_func ( int argc, VALUE *argv, VALUE self ) {
+VALUE rb_osync_rubymodule_objformat_set_finalize_func ( int argc, VALUE *argv, VALUE self ) {
     OSyncObjFormat *arg1 = ( OSyncObjFormat * ) 0 ;
     void *argp1 = 0 ;
     int res1 = 0 ;
@@ -1578,8 +1507,7 @@ fail:
     return Qnil;
 }
 
-VALUE
-rb_osync_rubymodule_objformat_set_compare_func ( int argc, VALUE *argv, VALUE self ) {
+VALUE rb_osync_rubymodule_objformat_set_compare_func ( int argc, VALUE *argv, VALUE self ) {
     OSyncObjFormat *arg1 = ( OSyncObjFormat * ) 0 ;
     void *argp1 = 0 ;
     int res1 = 0 ;
@@ -1600,8 +1528,7 @@ fail:
     return Qnil;
 }
 
-VALUE
-rb_osync_rubymodule_objformat_set_destroy_func ( int argc, VALUE *argv, VALUE self ) {
+VALUE rb_osync_rubymodule_objformat_set_destroy_func ( int argc, VALUE *argv, VALUE self ) {
     OSyncObjFormat *arg1 = ( OSyncObjFormat * ) 0 ;
     void *argp1 = 0 ;
     int res1 = 0 ;
@@ -1622,8 +1549,7 @@ fail:
     return Qnil;
 }
 
-VALUE
-rb_osync_rubymodule_objformat_set_copy_func ( int argc, VALUE *argv, VALUE self ) {
+VALUE rb_osync_rubymodule_objformat_set_copy_func ( int argc, VALUE *argv, VALUE self ) {
     OSyncObjFormat *arg1 = ( OSyncObjFormat * ) 0 ;
     void *argp1 = 0 ;
     int res1 = 0 ;
@@ -1644,8 +1570,7 @@ fail:
     return Qnil;
 }
 
-VALUE
-rb_osync_rubymodule_objformat_set_duplicate_func ( int argc, VALUE *argv, VALUE self ) {
+VALUE rb_osync_rubymodule_objformat_set_duplicate_func ( int argc, VALUE *argv, VALUE self ) {
     OSyncObjFormat *arg1 = ( OSyncObjFormat * ) 0 ;
     void *argp1 = 0 ;
     int res1 = 0 ;
@@ -1666,8 +1591,7 @@ fail:
     return Qnil;
 }
 
-VALUE
-rb_osync_rubymodule_objformat_set_create_func ( int argc, VALUE *argv, VALUE self ) {
+VALUE rb_osync_rubymodule_objformat_set_create_func ( int argc, VALUE *argv, VALUE self ) {
     OSyncObjFormat *arg1 = ( OSyncObjFormat * ) 0 ;
     void *argp1 = 0 ;
     int res1 = 0 ;
@@ -1688,8 +1612,7 @@ fail:
     return Qnil;
 }
 
-VALUE
-rb_osync_rubymodule_objformat_set_print_func ( int argc, VALUE *argv, VALUE self ) {
+VALUE rb_osync_rubymodule_objformat_set_print_func ( int argc, VALUE *argv, VALUE self ) {
     OSyncObjFormat *arg1 = ( OSyncObjFormat * ) 0 ;
     void *argp1 = 0 ;
     int res1 = 0 ;
@@ -1710,8 +1633,7 @@ fail:
     return Qnil;
 }
 
-VALUE
-rb_osync_rubymodule_objformat_set_revision_func ( int argc, VALUE *argv, VALUE self ) {
+VALUE rb_osync_rubymodule_objformat_set_revision_func ( int argc, VALUE *argv, VALUE self ) {
     OSyncObjFormat *arg1 = ( OSyncObjFormat * ) 0 ;
     void *argp1 = 0 ;
     int res1 = 0 ;
@@ -1732,8 +1654,7 @@ fail:
     return Qnil;
 }
 
-VALUE
-rb_osync_rubymodule_objformat_set_marshal_func ( int argc, VALUE *argv, VALUE self ) {
+VALUE rb_osync_rubymodule_objformat_set_marshal_func ( int argc, VALUE *argv, VALUE self ) {
     OSyncObjFormat *arg1 = ( OSyncObjFormat * ) 0 ;
     void *argp1 = 0 ;
     int res1 = 0 ;
@@ -1754,8 +1675,7 @@ fail:
     return Qnil;
 }
 
-VALUE
-rb_osync_rubymodule_objformat_set_demarshal_func ( int argc, VALUE *argv, VALUE self ) {
+VALUE rb_osync_rubymodule_objformat_set_demarshal_func ( int argc, VALUE *argv, VALUE self ) {
     OSyncObjFormat *arg1 = ( OSyncObjFormat * ) 0 ;
     void *argp1 = 0 ;
     int res1 = 0 ;
@@ -1776,8 +1696,7 @@ fail:
     return Qnil;
 }
 
-VALUE
-rb_osync_rubymodule_objformat_set_validate_func ( int argc, VALUE *argv, VALUE self ) {
+VALUE rb_osync_rubymodule_objformat_set_validate_func ( int argc, VALUE *argv, VALUE self ) {
     OSyncObjFormat *arg1 = ( OSyncObjFormat * ) 0 ;
     void *argp1 = 0 ;
     int res1 = 0 ;

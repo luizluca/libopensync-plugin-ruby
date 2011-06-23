@@ -19,25 +19,28 @@
 
 /* Convert Booleans  */
 #ifdef SWIGRUBY
-%typemap(in) osync_bool { 
- $1 = ($input==Qfalse ? FALSE : TRUE); 
+%typemap(in) osync_bool {
+ $1 = ($input==Qfalse ? FALSE : TRUE);
 }
 %typemap(out) osync_bool {
- $result = ($1==FALSE ? Qfalse : Qtrue); 
+ $result = ($1==FALSE ? Qfalse : Qtrue);
 }
 
-%typemap(in) void* { 
-  $1 = (void*)$input; 
+/* memory leak */
+%typemap(in) void* {
+  $1 = malloc(sizeof(VALUE));
+  rb_gc_register_address($1);
+  *(VALUE*)$1=$input;
 }
-%typemap(out) void* { 
-  $result = $1 ? (VALUE)$1 : Qnil;
+%typemap(out) void* {
+  $result = $1 ? *(VALUE*)$1 : Qnil;
 }
 
-%typemap(in) time_t { 
-  $1 = FIX2LONG(rb_funcall($input, rb_intern("to_i"), 0)); 
+%typemap(in) time_t {
+  $1 = FIX2LONG(rb_funcall($input, rb_intern("to_i"), 0));
 }
 %typemap(out) time_t {
-  $result = rb_funcall(rb_cTime, rb_intern("at"), 1, LONG2FIX($1)); 
+  $result = rb_funcall(rb_cTime, rb_intern("at"), 1, LONG2FIX($1));
 }
 
 %typemap(in) (char *data, unsigned int size) {
@@ -55,20 +58,20 @@
    $2 = &temp_size;
 }
 %typemap(argout) (char **buffer, unsigned int *size) {
-  $result = SWIG_FromCharPtrAndSize(temp_buffer$argnum, temp_size$argnum); 
+  $result = SWIG_FromCharPtrAndSize(temp_buffer$argnum, temp_size$argnum);
 };
 
 %typemap(in, numinputs=0) (osync_bool *issame) (osync_bool temp_issame) {
    $1 = &temp_issame;
 }
 %typemap(argout) (osync_bool *issame) {
-  $result = (temp_issame$argnum==FALSE ? Qfalse : Qtrue); 
+  $result = (temp_issame$argnum==FALSE ? Qfalse : Qtrue);
 };
 
 /* error parameter marked as optional. No need to be supplied*/
 %typemap(default) OSyncError** error (OSyncError* error) {
   error = NULL;
-  $1 = &error;    
+  $1 = &error;
 }
 
 %typemap(freearg) OSyncError** error{
@@ -76,7 +79,7 @@
   if (error$argnum) {
 /*     VALUE rb_eOSync = rb_path2class("Opensync::Error");
 *     if (rb_eOSync == Qnil)
-*       rb_eOSync = rb_eStandardError;  */  
+*       rb_eOSync = rb_eStandardError;  */
     rb_raise(rb_eStandardError, "%s",osync_error_print(&error$argnum));
     osync_error_unref(&error$argnum);
     SWIG_fail;
@@ -91,26 +94,26 @@
   for (item = list; item; item = item->next) {
 #define $symname
 #if defined(osync_plugin_env_get_plugins)
-    rb_ary_push(array, SWIG_NewPointerObj(SWIG_as_voidptr(item->data), SWIGTYPE_p_OSyncPlugin, 0 |  0 )); 
+    rb_ary_push(array, SWIG_NewPointerObj(SWIG_as_voidptr(item->data), SWIGTYPE_p_OSyncPlugin, 0 |  0 ));
 #elif defined(osync_plugin_info_get_objtype_sinks)
-    rb_ary_push(array, SWIG_NewPointerObj(SWIG_as_voidptr(item->data), SWIGTYPE_p_OSyncObjTypeSink, 0 |  0 ));      
+    rb_ary_push(array, SWIG_NewPointerObj(SWIG_as_voidptr(item->data), SWIGTYPE_p_OSyncObjTypeSink, 0 |  0 ));
 #elif defined(osync_plugin_config_get_advancedoptions)
-    rb_ary_push(array, SWIG_NewPointerObj(SWIG_as_voidptr(item->data), SWIGTYPE_p_OSyncPluginAdvancedOption, 0 |  0 ));      
+    rb_ary_push(array, SWIG_NewPointerObj(SWIG_as_voidptr(item->data), SWIGTYPE_p_OSyncPluginAdvancedOption, 0 |  0 ));
 #elif defined(osync_plugin_config_get_resources)
     rb_ary_push(array, SWIG_NewPointerObj(SWIG_as_voidptr(item->data), SWIGTYPE_p_OSyncPluginResource, 0 |  0 ));
 #elif defined(osync_plugin_advancedoption_get_parameters)
-    rb_ary_push(array, SWIG_NewPointerObj(SWIG_as_voidptr(item->data), SWIGTYPE_p_OSyncPluginAdvancedOptionParameter, 0 |  0 ));       
+    rb_ary_push(array, SWIG_NewPointerObj(SWIG_as_voidptr(item->data), SWIGTYPE_p_OSyncPluginAdvancedOptionParameter, 0 |  0 ));
 #elif defined(osync_plugin_advancedoption_get_valenums)
-    rb_ary_push(array, SWIG_FromCharPtr(SWIG_as_voidptr(item->data)));		      
+    rb_ary_push(array, SWIG_FromCharPtr(SWIG_as_voidptr(item->data)));
 #elif defined(osync_plugin_advancedoption_param_get_valenums)
     rb_ary_push(array, SWIG_FromCharPtr(SWIG_as_voidptr(item->data)));
 #elif defined(osync_plugin_resource_get_objformat_sinks)
-    rb_ary_push(array, SWIG_NewPointerObj(SWIG_as_voidptr(item->data), SWIGTYPE_p_OSyncObjFormatSink, 0 |  0 ));       
+    rb_ary_push(array, SWIG_NewPointerObj(SWIG_as_voidptr(item->data), SWIGTYPE_p_OSyncObjFormatSink, 0 |  0 ));
 #elif defined(osync_objtype_sink_get_objformat_sinks)
-    rb_ary_push(array, SWIG_NewPointerObj(SWIG_as_voidptr(item->data), SWIGTYPE_p_OSyncObjFormatSink, 0 |  0 ));       
+    rb_ary_push(array, SWIG_NewPointerObj(SWIG_as_voidptr(item->data), SWIGTYPE_p_OSyncObjFormatSink, 0 |  0 ));
 #else
     rb_exc_raise(rb_exc_new2(rb_eArgError, "SWIG typemap for '$symname' is not implemented yet. Add it to swig interface"));
-#endif      
+#endif
 #undef $symname
   }
   osync_list_free(list);
