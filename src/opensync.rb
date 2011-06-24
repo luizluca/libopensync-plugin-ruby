@@ -323,6 +323,14 @@ module Opensync
 			Opensync.#{method}(@_self, value)
 		    end
 		    "
+		    # Callbacks definition
+		    if suffix =~ /_func$/
+			self.class_eval "
+			def #{property}(&block)
+			    self.#{property}=callback(:#{property[0..-6]}, &block)
+			end
+			"
+		    end
 		when /^is_/
 		    property=suffix[3..-1]		    #
 		    self.class_eval "
@@ -365,8 +373,8 @@ module Opensync
 	    @@swig2ruby[klass]=self
 	end
 
-	def callback(&block)
-	    Proc.new do
+	def callback(name=nil, &block)
+	    proc=Proc.new do
 	      |*args|
 	      args=self.class.map_object(args)
 	      result=block.call(*args)
@@ -376,6 +384,14 @@ module Opensync
 		 result
 	      end
 	    end
+	    def proc.desc=(related)
+		@related=related
+	    end
+	    def proc.inspect
+		"Callback #{@related}"
+	    end
+	    proc.desc="#{self.to_s}.#{name}[#{block.source_location.join(":") if block.source_location}]"
+	    proc
 	end
 
 	#
@@ -457,6 +473,10 @@ module Opensync
     end
 
     class FormatConverter < OSyncObject
+	def self.new(type, sourceformat, targetformat, block)
+	    super(type, sourceformat, targetformat, block)
+	end
+
 	map_methods /^osync_converter_/
 	represent SWIG::TYPE_p_OSyncFormatConverter
     end

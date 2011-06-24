@@ -83,12 +83,25 @@
 #
 # Or under OsyncObject classes:
 #
-#  plugin.discover=Proc.new {|_info, _data| info=Info.for(_info); info.xxx }
+#  plugin.discover_func=Proc.new {|_plugin, _info, _data| info=Info.for(_info); info.xxx }
 #
 # The received arguments are SWIG objects. However, OsyncObject.callback creates a callable block that
 # converts SWIG to/from ruby.
 #
-#  plugin.discover=callback {|info, data| info.xxx }
+#  plugin.discover_func=callback {|plugin, info, data| info.xxx }
+#
+# callback can receive a argument with the name of callback
+#
+#  plugin.discover_func=callback(:discover) {|plugin, info, data| info.xxx }
+#
+# This can help in debugging as inspect of the callback will show the name.
+# There is an alternative callback setter. It calls the callback and also sets the name.
+# This is equivalent to the previous example
+#
+#  plugin.discover_func {|plugin, info, data| info.xxx }
+#
+##
+#
 #
 #
 # TRACES
@@ -114,9 +127,9 @@ class RubyFileSync < Opensync::Plugin
 	  self.name="ruby-file-sync"
 	  self.longname="File Synchronization Plugin"
 	  self.description="Plugin to synchronize files on the local filesystem"
-	  self.initialize_func=self.callback {|plugin, info| initialize0(info)}
-	  self.finalize_func=self.callback   {|plugin, plugin_data| finalize(plugin_data) }
-	  self.discover_func=self.callback   {|plugin, info| discover(info)}
+	  self.initialize_func {|plugin, info| initialize0(info)}
+	  self.finalize_func {|plugin, plugin_data| finalize(plugin_data) }
+	  self.discover_func {|plugin, info, plugin_data| discover(info, plugin_data)}
       end
 
       def initialize0(info)
@@ -152,11 +165,11 @@ class RubyFileSync < Opensync::Plugin
 		end
 	    end
 
-	    sink.connect_func=callback{|*args| connect_func(*args) }
-	    sink.get_changes_func=callback{|*args| get_changes_func(*args) }
-	    sink.commit_func=callback{|*args| commit_func(*args) }
-	    sink.read_func=callback{|*args| read_func(*args) }
-	    sink.sync_done_func=callback{|*args| sync_done(*args) }
+	    sink.connect_func {|*args| connect_func(*args) }
+	    sink.get_changes_func {|*args| get_changes_func(*args) }
+	    sink.commit_func {|*args| commit_func(*args) }
+	    sink.read_func {|*args| read_func(*args) }
+	    sink.sync_done_func {|*args| sync_done(*args) }
 
 	    sink.userdata=dir
 	    sink.enable_state_db(true)
@@ -330,8 +343,8 @@ class RubyFileSync < Opensync::Plugin
 	      change.data=odata
 	      ctx.report_change(change)
 	      hashtable.update_change(change)
-	end
-	ctx.report_success
+	  end
+	  ctx.report_success
       end
 
       def filename_scape_characters(tmp)
@@ -398,12 +411,12 @@ class FileFormat < Opensync::ObjectFormat
 
     def initialize_new(name, objtype)
 	# Map the callbacks
-        self.compare_func=callback{|format, *args| self._compare(*args) }
-	self.destroy_func=callback{|format, *args| self._destroy(*args) }
-	self.duplicate_func=callback{|format, *args| self._duplicate(*args) }
-	self.print_func=callback{|format, *args| self._print(*args) }
-	self.revision_func=callback{|format, *args| self._revision(*args) }
-	self.copy_func=callback{|format, *args| self._copy(*args) }
+        self.compare_func {|format, *args| self._compare(*args) }
+	self.destroy_func {|format, *args| self._destroy(*args) }
+	self.duplicate_func {|format, *args| self._duplicate(*args) }
+	self.print_func {|format, *args| self._print(*args) }
+	self.revision_func {|format, *args| self._revision(*args) }
+	self.copy_func {|format, *args| self._copy(*args) }
     end
 
     private
