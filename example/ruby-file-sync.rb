@@ -182,7 +182,7 @@ class RubyFileSync < Opensync::Plugin
       end
 
       def finalize(plugin_data)
-	  # Clean the callback references (and let GC clean) TODO: check
+	  # Clean the callback references (and let GC clean) TODO: check if it is cleaned
 	  plugin_data.directories.each {|dir| dir.sink.clean }
 
 	  # Maybe a module can be initialized and finalized and initialized and finalize and...
@@ -190,9 +190,9 @@ class RubyFileSync < Opensync::Plugin
 	  #self.clean
       end
 
-      def discovery(info, plugin_data)
-	  self.sinks.each {|sink| sink.avaiable=true}
-	  version = OsyncVersion.new
+      def discover(info, plugin_data)
+	  info.objtype_sinks.each {|sink| sink.available=true }
+	  version = Opensync::Version.new
 	  version.plugin = self.name
 	  info.version = version
       end
@@ -219,11 +219,10 @@ class RubyFileSync < Opensync::Plugin
 	  tmp = filename_scape_characters(change.uid)
 	  filename = Pathname.new(dir.path) + tmp
 
-	  file = File.new(filename)
-	  data = file.gets(nil)
-	  odata = nil
+	  data=nil
+	  filename.open{|io| data=io.gets(nil) }
 
-	  file = FileFormat::FileFormatData.new
+	  file = FileFormat::FileFormat::Data.new
 	  stat = file.stat
 	  file.userid = stat.uid
 	  file.groupid = stat.gid;
@@ -237,6 +236,7 @@ class RubyFileSync < Opensync::Plugin
 	  odata = Opensync::Data.new(file, fileformat)
 	  odata.objtype=sink.name
 	  change.data=odata
+
 	  ctx.report_change(change)
       end
 
@@ -261,7 +261,7 @@ class RubyFileSync < Opensync::Plugin
 	      #FIXME add ownership for file-sync
 	      odata = change.data
 	      buffer = odata.data
-	      file = FileFormatData.from_buf(buffer)
+	      file = FileFormat::Data.from_buf(buffer)
 
 	      # Is my implementation equal?
 	      # ??? osync_file_write (filename, file.data, file.size, file.mode)
@@ -276,9 +276,10 @@ class RubyFileSync < Opensync::Plugin
       def report_dir(dir, info, subdir, ctx)
 	  formatenv=info.format_env
 	  hashtable=dir.sink.hashtable
-
 	  path = Pathname.new(dir.path) + subdir
-	  path.entries do
+
+	  #$stderr.puts path, path.entries.size, path.entries
+	  path.entries.reject {|entry| [".",".."].include?(entry.to_s)}.each do
 	    |entry|
 	    filename = Pathname.new(dir.path) + entry
 	    if !subdir
@@ -293,28 +294,26 @@ class RubyFileSync < Opensync::Plugin
 		end
 	    elsif File.file?(filename)
 		change=Opensync::Change.new
-		change.uid=relative_filename
+		change.uid=relative_filename.to_s
 		change.hash=generate_hash(File.new(filename))
-		type = hashtable.changetype(change)
+		type = hashtable.get_changetype(change)
 		change.changetype=type
 
 		hashtable.update_change(change)
 
 		next if type == Opensync::OSYNC_CHANGE_TYPE_UNMODIFIED
 
-		# TODO: test this part
-		# FIXME: use something that closes the file
-		data = File.new(filename).gets(nil)
-		odata = nil
+		data=nil
+		filename.open{|io| data=io.gets(nil) }
 
-		file = FileFormatData.new
+		file = FileFormat::Data.new
 		file.data = data;
-		file.size = size;
-		file.path = relative_filename;
+		file.size = data.size;
+		file.path = relative_filename.to_s;
 		fileformat = formatenv.find_objformat("file")
 
 		odata = Opensync::Data.new(file.to_buf, fileformat)
-		odata.objtype=sink.name
+		odata.objtype=dir.sink.name
 		change.data=odata
 		ctx.report_change(change)
 	    end
@@ -380,7 +379,7 @@ class RubyFileSync < Opensync::Plugin
 end
 
 class FileFormat < Opensync::ObjectFormat
-    class FileFormatData
+    class Data
 	attr_accessor :mode, :userid, :groupid, :last_mod, :path, :data, :size
 
 	def to_s
@@ -417,13 +416,16 @@ class FileFormat < Opensync::ObjectFormat
 	self.print_func {|format, *args| self._print(*args) }
 	self.revision_func {|format, *args| self._revision(*args) }
 	self.copy_func {|format, *args| self._copy(*args) }
+
+	self.marshal_func {|format, *args| self._marshal(*args) }
+	self.demarshal_func {|format, *args| self._demarshal(*args) }
     end
 
-    private
+#     private
 
-    def _compare(leftdata, rightdata)
-      	leftfile = FileFormatData.from_buf(leftdata);
-	rightfile = FileFormatData.from_buf(rightdata);
+    def _compare(leftdata, rightdata, user_data)
+      	leftfile = FileFormat::Data.from_buf(leftdata);
+	rightfile = FileFormat::Data.from_buf(rightdata);
 
 	return Opensync::OSYNC_CONV_DATA_MISMATCH if not leftfile.path == rightfile.path
 	return Opensync::OSYNC_CONV_DATA_SIMILAR  if not leftfile.size == rightfile.size
@@ -432,25 +434,37 @@ class FileFormat < Opensync::ObjectFormat
     end
 
     # Do I need this?
-    def _destroy(data)
+    def _destroy(data,user_data)
     end
 
-    def _duplicate(uid, input)
-	file=FileFormatData.from_buf(input)
+    def _duplicate(uid, input,user_data)
+	file=FileFormat::Data.from_buf(input)
 	file.path="#{copy.path}-dupe"
 	[file.path, file.to_buf, true]
     end
 
-    def _copy(input)
-	FileFormatData.from_buf(input).dup.to_buf
+    def _copy(input,user_data)
+	FileFormat::Data.from_buf(input).dup.to_buf
     end
 
-    def _revision(input)
-	FileFormatData.from_buf(input).mtime
+    def _revision(input,user_data)
+	FileFormat::Data.from_buf(input).mtime
     end
 
-    def _print(data)
-	FileFormatData.from_buf(data).to_s
+    def _print(data,user_data)
+	[FileFormat::Data.from_buf(data).to_s, false]
+    end
+
+    def _marshal(input, marshal, user_data)
+	marshal.write_string(input.path)
+	marshal.write_buffer(input.data)
+    end
+
+    def _demarshal(marshal, user_data)
+	file = FileFormat::Data.new
+	file.path = marshal.read_string
+	file.data = marshal.read_buffer
+	file.to_buf
     end
 end
 
@@ -461,17 +475,18 @@ class PlainFormat < Opensync::ObjectFormat
 	self.destroy_func=callback{|format, *args| self._destroy(*args) }
     end
 
-    def _compare(leftdata, rightdata)
+    def _compare(leftdata, rightdata, userdata)
 	return Opensync::OSYNC_CONV_DATA_MISMATCH if not leftdata == rightdata
 	return Opensync::OSYNC_CONV_DATA_SAME
     end
 
-    def _copy(input)
+    def _copy(input, userdata)
 	input.dup
     end
 
-    def _destroy(input)
+    def _destroy(input, userdata)
 	#nothing to do?
+	true
     end
 
     def self.get_format_info(env)
@@ -485,17 +500,17 @@ end
 
 class FilePlainConverter < Opensync::FormatConverter
 
-    def convert_file_to_plain(input)
-	FileFormatData.from_buf(input).data.dup
+    def self.convert_file_to_plain(input)
+	[FileFormat::Data.from_buf(input).data.dup, false]
     end
 
-    def convert_plain_to_file(input)
-	file=FileFormatData.new
+    def self.convert_plain_to_file(input)
+	file=FileFormat::Data.new
 	# TODO
 	file.path = Opensync::osync_rand_str(rand(100)+1)
 	file.data = input;
 	file.size = input.size;
-	file.to_buf
+	[file.to_buf, false]
     end
 
     def self.get_conversion_info(env)
@@ -505,12 +520,10 @@ class FilePlainConverter < Opensync::FormatConverter
 	    raise "Unable to find plain format"
 
 	# TODO: change new method in order to implicitily call the callback (or something better)
-	conv = FilePlainConverter.new(Opensync::OSYNC_CONVERTER_DECAP, file, plain, Proc.new {|| puts "convert!"}) or
-	    return false
+	conv = FilePlainConverter.new(Opensync::OSYNC_CONVERTER_DECAP, file, plain, Proc.new {|converter, input, config, userdata| convert_file_to_plain(input)})
 	env.register_converter(conv)
 
-	conv = FilePlainConverter.new(Opensync::OSYNC_CONVERTER_ENCAP, plain, file, Proc.new {|| puts "convert!"}) or
-	    return false
+	conv = FilePlainConverter.new(Opensync::OSYNC_CONVERTER_ENCAP, plain, file, Proc.new {|converter, input, config, userdata| convert_file_to_plain(input)})
 	env.register_converter(conv)
 
 	return true

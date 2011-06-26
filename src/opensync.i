@@ -169,7 +169,11 @@ typedef enum {
 %include "opensync/format/opensync_objformat.h"
 %include "opensync/format/opensync_objformat_sink.h"
 %include "opensync/format/opensync_merger.h"
+%include "opensync/common/opensync_marshal.h"
 %include "opensync/data/opensync_data.h"
+%include "opensync/data/opensync_change.h"
 %include "opensync/debug/opensync_trace.h"
 %include "opensync/helper/opensync_sink_state_db.h"
 %include "opensync/helper/opensync_hashtable.h"
+%include "opensync/version/opensync_version.h"
+

@@ -256,10 +256,10 @@ module Opensync
 	private :initialize_from, :initialize_new
 
 	@@unmapped_methods=Set.new(Opensync.methods.select {|method| /^osync_(?!get_version)/ =~ method.to_s })
-# 	@@unmapped_methods.delete("osync_rubymodule_get_data")
-# 	@@unmapped_methods.delete("osync_rubymodule_set_data")
-# 	@@unmapped_methods.delete("osync_rubymodule_clean_data")
-
+	@@unmapped_methods.delete(:osync_rubymodule_get_data)
+	@@unmapped_methods.delete(:osync_rubymodule_set_data)
+	@@unmapped_methods.delete(:osync_rubymodule_clean_data)
+	@@unmapped_methods.select {|method| method.to_s =~ /^osync_trace/ }.each {|method| @@unmapped_methods.delete(method)}
 	def self.map_methods(regexp)
 	    @@unmapped_methods.
 	      select {|method| regexp =~ method.to_s }.
@@ -486,6 +486,11 @@ module Opensync
 	represent SWIG::TYPE_p_OSyncData
     end
 
+    class Change < OSyncObject
+	map_methods /^osync_change_/
+	represent SWIG::TYPE_p_OSyncChange
+    end
+
     class Context < OSyncObject
 	map_methods /^osync_context_/
 	represent SWIG::TYPE_p_OSyncContext
@@ -518,6 +523,12 @@ module Opensync
 	map_methods /^osync_hashtable_/
 	represent SWIG::TYPE_p_OSyncHashTable
 
+	undef :changetype
+	def get_changetype(change)
+	    change=change._self if change.kind_of? OSyncObject
+	    self.class.map_object(Opensync.osync_hashtable_get_changetype(@_self, change))
+	end
+
 	# Not allocated by _new, not controled
 	def self.unref(obj)
 	end
@@ -527,14 +538,18 @@ module Opensync
     end
 
     class Version < OSyncObject
+	map_methods /^osync_version_/
 	represent SWIG::TYPE_p_OSyncVersion
-	# TODO
-	#map_methods /^osync_objformat_sink_/
     end
 
     class Merger < OSyncObject
 	map_methods /^osync_merger_/
 	represent SWIG::TYPE_p_OSyncMerger
+    end
+
+    class Marshal < OSyncObject
+	map_methods /^osync_marshal_/
+	represent SWIG::TYPE_p_OSyncMarshal
     end
 
     # TODO: Check if osync_format should be osync_objformat
@@ -552,7 +567,7 @@ module Opensync
 end
 
 # TODO: osync_objtype_main_sink_new is mapped where? What is it for? Check docs.
-#Opensync::OSyncObject.unmapped_methods.to_a.each {|method| warn("Atention! Method #{method} not mapped!") }
+Opensync::OSyncObject.unmapped_methods.to_a.each {|method| warn("Atention! Method #{method} not mapped!") }
 #GC.stress=true
 if $trace
   @untraced_classes << Opensync::OSyncObject
