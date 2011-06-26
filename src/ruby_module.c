@@ -1965,12 +1965,10 @@ void rubymodule_initialize() {
 }
 
 void rubymodule_finalize() {
-    pthread_mutex_lock ( &ruby_context_lock );
     g_hash_table_destroy ( rubymodule_data );
     RUBY_PROLOGUE
     ruby_finalize();
     RUBY_EPILOGUE
-    pthread_mutex_unlock ( &ruby_context_lock );
 }
 
 void *rubymodule_ruby_thread(void *threadid) {
@@ -1997,6 +1995,7 @@ void *rubymodule_ruby_thread(void *threadid) {
        debug_thread("Returning!\n");
        pthread_cond_signal(&fcall_returned);
     }
+    rubymodule_finalize();
     pthread_mutex_unlock ( &ruby_context_lock);
     pthread_exit(0);
 }
