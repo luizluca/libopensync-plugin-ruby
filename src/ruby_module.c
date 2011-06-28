@@ -50,12 +50,11 @@
 #define CAST_VALUE(value)     (value==NULL?Qnil:(VALUE)value)
 #define IND_VALUE(value)      (value==NULL?Qnil:*(VALUE*)value)
 
+#ifdef STACK_END_ADDRESS
+
 /* Hack to run ruby from a pthread */
 //https://github.com/whitequark/coldruby/blob/master/libcoldruby/MRIRubyCompiler.cpp
-
-#ifdef STACK_END_ADDRESS
 #include <sys/mman.h>
-
 extern void *STACK_END_ADDRESS;
 #define RUBY_PROLOGUE \
 	do { \
@@ -73,130 +72,8 @@ extern void *STACK_END_ADDRESS;
 #define RUBY_EPILOGUE
 #endif
 
-#define STR(X)		_STR(X)
-#define _STR(args...)	#args
-#define RUBYCALL_FUNC_NAME(module, function, suffix)         _RUBYCALL_FUNC_NAME(module, function, suffix)
-#define _RUBYCALL_FUNC_NAME(module, function, suffix)      osync_rubymodule_##module##_##function##suffix
-#define BEGIN_RUBYCALL_FUNC \
-static void* RUBYCALL_FUNC_NAME(rb_module,rb_function,_threaded)();\
-static rb_result_type RUBYCALL_FUNC_NAME(rb_module,rb_function,) rb_sig { \
-    char *signature  = strdup(STR(rb_sig)); \
-    char *str_argin  = strdeblank(strdup(STR(rb_argins))); \
-    char *str_argout  = strdeblank(strdup(STR(rb_argouts))); \
-    int nargin = strlen(str_argin)==0? 0 : strcount(str_argin, ',')+1; \
-    int nargout = strlen(str_argout)==0? 0 : strcount(str_argout, ',')+1; \
-    int i; \
-    rb_result_type result; \
-    struct arg_desc argsin[nargin]; \
-    struct arg_desc argsout[nargout]; \
-    save_args(signature, str_argin,  nargin, argsin, rb_argins); \
-    save_args(signature, str_argout, nargout, argsout, rb_argouts);\
-    debug_thread("Locking!\n"); \
-    pthread_mutex_lock ( &ruby_context_lock); \
-    debug_thread("Waiting for my time!\n"); \
-    if (!ruby_running) { \
-	debug_thread("Ruby thread is not running. Waiting\n"); \
-	pthread_cond_wait(&fcall_ruby_running, &ruby_context_lock); \
-	debug_thread("Ruby thread is running!\n"); \
-    } \
-    funcall_data.nargin  = nargin; \
-    funcall_data.nargout = nargout; \
-    funcall_data.argsin  = argsin; \
-    funcall_data.argsout = argsout; \
-    funcall_data.error  = error; \
-    funcall_data.func   = RUBYCALL_FUNC_NAME(rb_module,rb_function,_threaded); \
-    debug_thread("Sent!\n"); \
-    pthread_cond_signal(&fcall_requested); \
-    debug_thread("Waiting return!\n"); \
-    pthread_cond_wait(&fcall_returned, &ruby_context_lock); \
-    debug_thread("Returned!\n"); \
-    /* this long should be machine register */\
-    result = (rb_result_type)(long)funcall_data.result; \
-    pthread_mutex_unlock ( &ruby_context_lock); \
-    for(i=0;i<nargin;i++){ \
-      g_free(argsin[i].name);\
-      g_free(argsin[i].type);\
-    }\
-    for(i=0;i<nargout;i++){\
-      g_free(argsout[i].name);\
-      g_free(argsout[i].type);\
-    }\
-    free(signature);\
-    free(str_argin);\
-    return result;\
-}; \
-\
-static void* RUBYCALL_FUNC_NAME(rb_module,rb_function,_threaded) () {\
-    /*osync_trace ( TRACE_ENTRY, "%s(%p)", __func__, error );*/\
-    void *result; \
-    int ruby_error, i, nargin, nargout; \
-    struct arg_desc *argsin, *argsout; \
-    OSyncError		**error; \
-    VALUE ruby_result;\
-    nargin=funcall_data.nargin; nargout=funcall_data.nargout; \
-    argsin=funcall_data.argsin; argsout=funcall_data.argsout; \
-    error=funcall_data.error; \
-    VALUE ruby_args[nargin];\
-    for (i=0; i<nargin; i++) {\
-      swig_type_info *type = SWIG_TypeQuery(argsin[i].type);\
-      if (type) {\
-	ruby_args[i]=SWIG_NewPointerObj ( argsin[i].ptr, type, 0 |  0 );\
-      } else {\
-	ruby_args[i]=Qnil;\
-      }\
-    }
-
-#define END_RUBYCALL_FUNC \
-    osync_trace ( TRACE_EXIT, "%s: %p", __func__, result);\
-    return result;\
-error:\
-    osync_trace ( TRACE_EXIT_ERROR, "%s: %s", __func__, osync_error_print (error) );\
-    return NULL;\
-};
-
-/* This is the same of RUBYCALL. However, it also get the ruby callback object (rb_function"_func"),
- * call rb_funcall2_protected, method "call", and treat errors */
-#define BEGIN_CALLBACK_FUNC \
-BEGIN_RUBYCALL_FUNC \
-    VALUE callback = osync_rubymodule_get_data (argsin[0].ptr, STR(rb_function) "_func" );\
-    ruby_result = rb_funcall2_protected ( callback, "call", nargin, ruby_args, &ruby_error );\
-    if ( ruby_error!=0 ) {\
-        osync_error_set (error, OSYNC_ERROR_GENERIC, "Failed to call " STR(rb_module) " " STR(rb_function) "function!\n%s",\
-                          osync_rubymodule_error_bt ( __FILE__, __func__,__LINE__ ) );\
-        goto error;\
-    }
-
-
-#define END_CALLBACK_FUNC 	END_RUBYCALL_FUNC \
- \
-_DEFINE_SET_CALLBACK_FUNC(cb_ownertype, rb_module, rb_function)
-
-#define _DEFINE_SET_CALLBACK_FUNC(cb_ownertype, rb_module, rb_function) DEFINE_SET_CALLBACK_FUNC(cb_ownertype, rb_module, rb_function)
-
-
-/*Declares the method rb_osync_##module_set_##function_func which sets the callback to
- osync_rubymodule_##module_##function and saves the ruby callback in #function "_func" */
-#define DEFINE_SET_CALLBACK_FUNC(type, module, function) \
-VALUE rb_osync_##module##_set_##function##_func ( int argc, VALUE *argv, VALUE self ) {\
-    type *arg1 = ( type * ) 0 ;\
-    void *argp1 = 0 ;\
-    int res1 = 0 ;\
-    if ( ( argc < 2 ) || ( argc > 2 ) ) {\
-        rb_raise ( rb_eArgError, "wrong # of arguments(%d for 2)",argc );\
-        SWIG_fail;\
-    }\
-    res1 = SWIG_ConvertPtr ( argv[0], &argp1,SWIGTYPE_p_##type, 0 |  0 );\
-    if ( !SWIG_IsOK ( res1 ) ) {\
-        SWIG_exception_fail ( SWIG_ArgError ( res1 ), Ruby_Format_TypeError ( "", #type "*", "osync_" #module "_set_" #function "_func", 1, argv[0] ) );\
-    }\
-    arg1 = ( type * ) ( argp1 );\
-    osync_rubymodule_set_data ( argp1, #function "_func", argv[1] );\
-    osync_##module##_set_##function##_func ( arg1, osync_rubymodule_##module##_##function );\
-    return Qnil;\
-fail:\
-    return Qnil;\
-}
-
+/* Converts to string */
+#define STR(args...)	#args
 
 //#define DEBUG_MUTEX
 //#define DEBUG_THREAD
@@ -249,6 +126,7 @@ static pthread_attr_t 	attr;
 // static int      	ruby_uses = 0;
 GHashTable 		*rubymodule_data;
 
+void rubymodule_ruby_needed();
 
 struct threaded_funcall;
 typedef void* (* threaded_func) ();
@@ -277,6 +155,7 @@ size_t strcount(const char *string, const char chr) {
   }
   return count;
 }
+
 char* strdeblank(char *instr) {
   char *str = g_strchug(instr);
   char *result = str;
@@ -304,14 +183,13 @@ void save_args(char* signature, char* strargs, int argc, struct arg_desc *args, 
     for (i = 0; i < argc; i++) {
 	arg = va_arg(ap, void*);
 	args[i].ptr=arg;
-	args[i].name=strsep(&running_name,",");
+	args[i].name=strdup(strsep(&running_name,","));
 	// TODO Error on empty
 
 	char* _signature=strdup(signature);
 	char* running_sig=_signature;
 	args[i].type="void";
 	while (token=strsep(&running_sig,",")){
-	    fprintf(stderr,"%s\n",token);
 	    token=g_strstrip(token);
 	    if (!g_str_has_suffix(token, args[i].name)) {
 	      continue;
@@ -341,7 +219,191 @@ void save_args(char* signature, char* strargs, int argc, struct arg_desc *args, 
     va_end(ap);
 }
 
-// VALUE rb_protect_sync(VALUE (*func)(VALUE), VALUE args, int *error) {
+
+#define CAST_AS_RUBY(ruby_arg, arg_desc) \
+      swig_type_info *type = SWIG_TypeQuery(arg_desc.type);\
+      if (type) { \
+	ruby_args[i]=SWIG_NewPointerObj ( argsin[i].ptr, type, 0 |  0 );\
+      } else { \
+	ruby_args[i]=Qnil;\
+      }
+
+#define CAST_ALL_AS_RUBY(ruby_args, args, narg) \
+    VALUE ruby_args[narg];\
+    for (i=0; i<narg; i++) {\
+      CAST_AS_RUBY(ruby_args[i], args[i]); \
+    }
+
+/* Generate a ruby method that, when called, will be executed inside the ruby thread
+ * It uses some defines as parameters
+ * #define rb_result_type 	The result type (i.e.: void*)
+ * #define rb_module		The corresponding module name (i.e.: plugin)
+ * #define rb_function		The function name (i.e.: initialize)
+ * #define rb_sig      		This function signature (i.e.: OSyncPlugin *plugin, OSyncPluginInfo *info, OSyncError **error )
+ * 				All functions must contain **error.
+ * #define rb_argins  		The arguments used as input or 0 for nothing. (i.e.: plugin, info)
+ * 				These will be accessible in code with (struct arg_desc *argsin) with size of nargin
+ * #define rb_argouts  		The arguments used as ouput or 0 for nothing: (i.e.: 0)
+ * 				These will be accessible in code with (struct arg_desc *argsout) with size of nargout
+ *
+ * It generates two methods:
+ *
+ *   NAME_RUBYCALL_FUNC(rb_module, rb_function)
+ *   NAME_RUBYCALL_FUNC(rb_module, rb_function##_threaded)
+ *
+ * Which expands to:
+ *
+ * osync_rubymodule_rb_module_rb_function
+ * osync_rubymodule_rb_module_rb_function_threaded
+ *
+ * The first one can be called normally. The second one is internal use only and it is called from the ruby thread.
+ *
+ * The code is written after BEGIN_RUBYCALL_FUNC and ends with END_RUBYCALL_FUNC. The result value must goes
+ * inside result local variable. If some error occured, set the error variable and "goto error;"
+ */
+
+/* Generate a ruby func name */
+#define NAME_RUBYCALL_FUNC(module, function)      osync_rubymodule_##module##_##function
+#define _NAME_RUBYCALL_FUNC(module, function)         NAME_RUBYCALL_FUNC(module, function)
+#define _NAME_RUBYCALL_FUNC_THREADED(module, function)         NAME_RUBYCALL_FUNC(module, function##_threaded)
+#define _STR(X)		STR(X)
+#define BEGIN_RUBYCALL_FUNC \
+static void* _NAME_RUBYCALL_FUNC_THREADED(rb_module,rb_function)();\
+static rb_result_type _NAME_RUBYCALL_FUNC(rb_module,rb_function)(rb_sig) { \
+    char *signature  = strdup(_STR(rb_sig)); \
+    char *str_argin  = strdeblank(strdup(_STR(rb_argins))); \
+    char *str_argout  = strdeblank(strdup(_STR(rb_argouts))); \
+    int nargin = str_argin[0]=='0'?   0 : strcount(str_argin, ',')+1; \
+    int nargout = str_argout[0]=='0'? 0 : strcount(str_argout, ',')+1; \
+    int i; \
+    rb_result_type result; \
+    struct arg_desc argsin[nargin]; \
+    struct arg_desc argsout[nargout]; \
+    rubymodule_ruby_needed(); \
+    save_args(signature, str_argin,  nargin, argsin, rb_argins); \
+    save_args(signature, str_argout, nargout, argsout, rb_argouts);\
+    debug_thread("Locking!\n"); \
+    pthread_mutex_lock ( &ruby_context_lock); \
+    debug_thread("Waiting for my time!\n"); \
+    if (!ruby_running) { \
+	debug_thread("Ruby thread is not running. Waiting\n"); \
+	pthread_cond_wait(&fcall_ruby_running, &ruby_context_lock); \
+	debug_thread("Ruby thread is running!\n"); \
+    } \
+    funcall_data.nargin  = nargin; \
+    funcall_data.nargout = nargout; \
+    funcall_data.argsin  = argsin; \
+    funcall_data.argsout = argsout; \
+    funcall_data.error  = error; \
+    funcall_data.func   = _NAME_RUBYCALL_FUNC_THREADED(rb_module,rb_function); \
+    debug_thread("Sent!\n"); \
+    pthread_cond_signal(&fcall_requested); \
+    debug_thread("Waiting return!\n"); \
+    pthread_cond_wait(&fcall_returned, &ruby_context_lock); \
+    debug_thread("Returned!\n"); \
+    /* this long should be machine register */\
+    result = (rb_result_type)(long)funcall_data.result; \
+    pthread_mutex_unlock ( &ruby_context_lock); \
+    for(i=0;i<nargin;i++){ \
+      free(argsin[i].name);\
+      free(argsin[i].type);\
+    }\
+    for(i=0;i<nargout;i++){\
+      free(argsout[i].name);\
+      free(argsout[i].type);\
+    }\
+    free(signature);\
+    free(str_argin);\
+    free(str_argout);\
+    return result;\
+}; \
+\
+static void* _NAME_RUBYCALL_FUNC_THREADED(rb_module,rb_function) () {\
+    /*osync_trace ( TRACE_ENTRY, "%s(%p)", __func__, error );*/\
+    rb_result_type result = (rb_result_type)0; \
+    int ruby_error, i, nargin, nargout; \
+    struct arg_desc *argsin, *argsout; \
+    OSyncError		**error; \
+    nargin=funcall_data.nargin; nargout=funcall_data.nargout; \
+    argsin=funcall_data.argsin; argsout=funcall_data.argsout; \
+    error=funcall_data.error;
+
+#define END_RUBYCALL_FUNC \
+    osync_trace ( TRACE_EXIT, "%s: %p", __func__, (void*)(long)result);\
+    return (void*)(long)result;\
+error:\
+    osync_trace ( TRACE_EXIT_ERROR, "%s: %s", __func__, osync_error_print (error) );\
+    return NULL;\
+};
+
+/* CALLBACKS
+ *
+ * BEGIN_CALLBACK_FUNC is the same of BEGIN_RUBYCALL_FUNC but it already implement the necessary
+ * code to be used as callback. The returned from ruby is accessible in (VALUE ruby_result).
+ *
+ *
+ * Also, it defines the function to be exposed inside ruby in order
+ * to set the callback block (using DEFINE_SET_CALLBACK_FUNC). This function name is expanded from:
+ *
+ * NAME_CALLBACK_SET_FUNC(rb_module, rb_function)
+ *
+ * Which gets:
+ *
+ * rb_osync_rb_module_set_rb_function_func
+ *
+ * Besides all the parameters already used in BEGIN_RUBYCALL_FUNC, BEGIN_CALLBACK_FUNC also needs;
+ *
+ * #define cb_ownertype   The type of the callback owner (i.e.: OSyncPlugin)
+ *
+ * The method must be registed in ruby:
+ *
+ * rb_define_module_function ( mOpensync, "osync_objformat_set_destroy_func", NAME_CALLBACK_SET_FUNC(objformat, destroy), -1 );
+ *
+ */
+#define NAME_CALLBACK_SET_FUNC(rb_module, rb_function) rb_osync_##rb_module##_set_##rb_function##_func
+#define _NAME_CALLBACK_SET_FUNC(rb_module, rb_function) NAME_CALLBACK_SET_FUNC(rb_module, rb_function)
+#define DEFINE_SET_CALLBACK_FUNC(cb_ownertype, rb_module, rb_function) \
+VALUE NAME_CALLBACK_SET_FUNC(rb_module, rb_function) ( int argc, VALUE *argv, VALUE self ) {\
+    cb_ownertype *arg1 = ( cb_ownertype * ) 0 ;\
+    void *argp1 = 0 ;\
+    int res1 = 0 ;\
+    if ( ( argc < 2 ) || ( argc > 2 ) ) {\
+        rb_raise ( rb_eArgError, "wrong # of arguments(%d for 2)",argc );\
+        SWIG_fail;\
+    }\
+    res1 = SWIG_ConvertPtr ( argv[0], &argp1,SWIGTYPE_p_##cb_ownertype, 0 |  0 );\
+    if ( !SWIG_IsOK ( res1 ) ) {\
+        SWIG_exception_fail ( SWIG_ArgError ( res1 ), Ruby_Format_TypeError ( "", #cb_ownertype "*", "osync_" #rb_module "_set_" #rb_function "_func", 1, argv[0] ) );\
+    }\
+    arg1 = ( cb_ownertype * ) ( argp1 );\
+    osync_rubymodule_set_data ( argp1, #rb_function "_func", argv[1] );\
+    osync_##rb_module##_set_##rb_function##_func ( arg1, osync_rubymodule_##rb_module##_##rb_function );\
+    return Qnil;\
+fail:\
+    return Qnil;\
+}
+/* This is the same of RUBYCALL. However, it also get the ruby callback object (rb_function"_func"),
+ * call rb_funcall2_protected, method "call", and treat errors */
+#define BEGIN_CALLBACK_FUNC \
+BEGIN_RUBYCALL_FUNC \
+    CAST_ALL_AS_RUBY(ruby_args, argsin, nargin); \
+    VALUE callback = osync_rubymodule_get_data (argsin[0].ptr, STR(rb_function) "_func" );\
+    VALUE ruby_result = rb_funcall2_protected ( callback, "call", nargin, ruby_args, &ruby_error );\
+    if ( ruby_error!=0 ) {\
+        osync_error_set (error, OSYNC_ERROR_GENERIC, "Failed to call " STR(rb_module) " " STR(rb_function) "function!\n%s",\
+                          osync_rubymodule_error_bt ( __FILE__, __func__,__LINE__ ) );\
+        goto error;\
+    }
+
+
+#define END_CALLBACK_FUNC 	END_RUBYCALL_FUNC \
+ \
+_DEFINE_SET_CALLBACK_FUNC(cb_ownertype, rb_module, rb_function)
+
+#define _DEFINE_SET_CALLBACK_FUNC(cb_ownertype, rb_module, rb_function) DEFINE_SET_CALLBACK_FUNC(cb_ownertype, rb_module, rb_function)
+
+
+// VALUE rb_protect(VALUE (*func)(VALUE), VALUE args, int *error) {
 //     VALUE result;
 //     pthread_mutex_lock ( &ruby_context_lock );
 //     result = rb_protect(func, args, error);
@@ -349,7 +411,7 @@ void save_args(char* signature, char* strargs, int argc, struct arg_desc *args, 
 //     return result;
 // }
 /*
-VALUE rb_protect_sync(VALUE (*func)(VALUE), VALUE args, int *error) {
+VALUE rb_protect(VALUE (*func)(VALUE), VALUE args, int *error) {
     VALUE result;
     debug_thread("Locking!\n");
     pthread_mutex_lock ( &ruby_context_lock);
@@ -830,7 +892,7 @@ error:
 #define rb_result_type 	void*
 #define rb_module	plugin
 #define rb_function	initialize
-#define rb_sig      	(OSyncPlugin *plugin, OSyncPluginInfo *info, OSyncError **error)
+#define rb_sig      	OSyncPlugin *plugin, OSyncPluginInfo *info, OSyncError **error
 #define rb_argins  	plugin, info
 #define rb_argouts  	error
 #define cb_ownertype  	OSyncPlugin
@@ -1327,7 +1389,7 @@ error:
 #define rb_result_type 	osync_bool
 #define rb_module	objformat
 #define rb_function	copy
-#define rb_sig      	(OSyncObjFormat *format, const char *input, unsigned int insize, char **output, unsigned int *outpsize, void *user_data, OSyncError **error)
+#define rb_sig      	OSyncObjFormat *format, const char *input, unsigned int insize, char **output, unsigned int *outpsize, void *user_data, OSyncError **error
 #define rb_argins  	format, input, insize, error, user_data
 #define rb_argouts  	output, outpsize
 #define cb_ownertype  	OSyncObjFormat
@@ -1338,7 +1400,7 @@ BEGIN_CALLBACK_FUNC
     }
     *((char**)argsout[0].ptr) = RSTRING_PTR ( ruby_result );
     *((unsigned int*)argsout[1].ptr) = RSTRING_LEN ( ruby_result );
-    result = (void*)TRUE;
+    result = TRUE;
 END_CALLBACK_FUNC
 #undef rb_result_type
 #undef rb_module
@@ -1445,26 +1507,28 @@ END_CALLBACK_FUNC
 // 	(format, input, insize, user_data),(output, outpsize))
 
 
+#define rb_result_type 	osync_bool
+#define rb_module	sync
+#define rb_function	info
+#define rb_sig      	OSyncPluginEnv *env, OSyncError **error
+#define rb_argins  	env
+#define rb_argouts  	0
+BEGIN_RUBYCALL_FUNC
+    CAST_ALL_AS_RUBY(ruby_args, argsin, nargin);
+
+    fprintf(stderr, "%lu\n", pthread_self());
+    fprintf(stderr,"teste!!! %i, %lu %s\n", nargin, ruby_args[0], RSTRING_PTR(rb_funcall(ruby_args[0], rb_intern("to_s"), 0)));
 
 
-void rubymodule_ruby_needed();
-
-osync_bool get_sync_info ( OSyncPluginEnv *env, OSyncError **error ) {
-    osync_trace ( TRACE_ENTRY, "%s(%p)", __func__, env );
     int status;
-    exit(0);
-
-    rubymodule_ruby_needed();
-
-    rb_protect_sync ( ( VALUE ( * ) ( VALUE ) ) rb_require, ( VALUE ) RUBY_BASE_FILE, &status );
-
+    rb_protect ( ( VALUE ( * ) ( VALUE ) ) rb_require, ( VALUE ) RUBY_BASE_FILE, &status );
     if ( status!=0 ) {
         osync_error_set ( error, OSYNC_ERROR_GENERIC, "Failed to load module ruby file '%s'!\n%s",RUBY_BASE_FILE,
                           osync_rubymodule_error_bt ( __FILE__, __func__,__LINE__ ) );
         goto error;
     }
 
-    VALUE plugin_class = rb_protect_sync ( ( VALUE ( * ) ( VALUE ) ) rb_path2class, ( VALUE ) RUBY_PLUGIN_CLASS, &status );
+    VALUE plugin_class = rb_protect ( ( VALUE ( * ) ( VALUE ) ) rb_path2class, ( VALUE ) RUBY_PLUGIN_CLASS, &status );
     if ( status!=0 ) {
         osync_error_set ( error, OSYNC_ERROR_GENERIC, "Error on finding %s class in %s!\n%s",RUBY_PLUGIN_CLASS, RUBY_BASE_FILE,
                           osync_rubymodule_error_bt ( __FILE__, __func__,__LINE__ ) );
@@ -1476,43 +1540,45 @@ osync_bool get_sync_info ( OSyncPluginEnv *env, OSyncError **error ) {
         goto error;
     }
 
-    VALUE args[1];
-    args[0] = SWIG_NewPointerObj ( SWIG_as_voidptr ( env ), SWIGTYPE_p_OSyncPluginEnv, 0 |  0 );
-    VALUE result = rb_funcall2_protected ( plugin_class,"get_sync_info",1, args,&status );
+    VALUE ruby_result = rb_funcall2_protected ( plugin_class,"get_sync_info", nargin, ruby_args, &status);
     if ( status!=0 ) {
         osync_error_set ( error, OSYNC_ERROR_GENERIC, "Failed to call %s.get_sync_info!\n%s", RUBY_PLUGIN_CLASS,
                           osync_rubymodule_error_bt ( __FILE__, __func__,__LINE__ ) );
         goto error;
     }
-
-    if ( !RBOOL ( result ) ) {
+    if ( !RBOOL ( ruby_result ) ) {
         goto error;
     }
+    result = TRUE;
+
+END_RUBYCALL_FUNC
+#undef rb_result_type
+#undef rb_module
+#undef rb_function
+#undef rb_sig
+#undef rb_argins
+#undef rb_argouts
 
 
-    osync_trace ( TRACE_EXIT, "%s: true", __func__ );
-
-    return TRUE;
-error:
-    osync_trace ( TRACE_ERROR, "Unable to register: %s", osync_error_print ( error ) );
-
-    return FALSE;
+osync_bool get_sync_info ( OSyncPluginEnv *env, OSyncError **error ) {
+//    osync_trace ( TRACE_ENTRY, "%s(%p)", __func__, env );
+    return NAME_RUBYCALL_FUNC(sync,info)(env, error);
 }
 
-osync_bool get_format_info ( OSyncFormatEnv *env, OSyncError **error ) {
+osync_bool get_format_infox ( OSyncFormatEnv *env, OSyncError **error ) {
     int   status;
     osync_trace ( TRACE_ENTRY, "%s(%p)", __func__, env );
 
     rubymodule_ruby_needed();
 
-    rb_protect_sync ( ( VALUE ( * ) ( VALUE ) ) rb_require, ( VALUE ) RUBY_BASE_FILE, &status );
+    rb_protect ( ( VALUE ( * ) ( VALUE ) ) rb_require, ( VALUE ) RUBY_BASE_FILE, &status );
     if ( status!=0 ) {
         osync_error_set ( error, OSYNC_ERROR_GENERIC, "Failed to load module ruby file '%s'!\n%s",RUBY_BASE_FILE,
                           osync_rubymodule_error_bt ( __FILE__, __func__,__LINE__ ) );
         goto error;
     }
 
-    VALUE plugin_class = rb_protect_sync ( ( VALUE ( * ) ( VALUE ) ) rb_path2class, ( VALUE ) RUBY_FORMAT_CLASS, &status );
+    VALUE plugin_class = rb_protect ( ( VALUE ( * ) ( VALUE ) ) rb_path2class, ( VALUE ) RUBY_FORMAT_CLASS, &status );
     if ( status!=0 ) {
         osync_error_set ( error, OSYNC_ERROR_GENERIC, "Error on finding %s class in %s!\n%s",RUBY_FORMAT_CLASS, RUBY_BASE_FILE,
                           osync_rubymodule_error_bt ( __FILE__, __func__,__LINE__ ) );
@@ -1545,20 +1611,20 @@ error:
     return FALSE;
 }
 
-osync_bool get_conversion_info ( OSyncFormatEnv *env, OSyncError **error ) {
+osync_bool get_conversion_infox ( OSyncFormatEnv *env, OSyncError **error ) {
     int   status;
     osync_trace ( TRACE_ENTRY, "%s(%p)", __func__, env );
 
     rubymodule_ruby_needed();
 
-    rb_protect_sync ( ( VALUE ( * ) ( VALUE ) ) rb_require, ( VALUE ) RUBY_BASE_FILE, &status );
+    rb_protect ( ( VALUE ( * ) ( VALUE ) ) rb_require, ( VALUE ) RUBY_BASE_FILE, &status );
     if ( status!=0 ) {
         osync_error_set ( error, OSYNC_ERROR_GENERIC, "Failed to load module ruby file '%s'!\n%s",RUBY_BASE_FILE,
                           osync_rubymodule_error_bt ( __FILE__, __func__,__LINE__ ) );
         goto error;
     }
 
-    VALUE plugin_class = rb_protect_sync ( ( VALUE ( * ) ( VALUE ) ) rb_path2class, ( VALUE ) RUBY_FORMAT_CLASS, &status );
+    VALUE plugin_class = rb_protect ( ( VALUE ( * ) ( VALUE ) ) rb_path2class, ( VALUE ) RUBY_FORMAT_CLASS, &status );
     if ( status!=0 ) {
         osync_error_set ( error, OSYNC_ERROR_GENERIC, "Error on finding %s class in %s!\n%s",RUBY_FORMAT_CLASS, RUBY_BASE_FILE,
                           osync_rubymodule_error_bt ( __FILE__, __func__,__LINE__ ) );
@@ -1960,6 +2026,8 @@ void *rubymodule_ruby_thread(void *threadid) {
 }
 
 void rubymodule_ruby_needed() {
+    if (ruby_started )
+	return;
     pthread_mutex_lock ( &ruby_context_lock);
     if (! ruby_started ) {
        int rc;
@@ -2012,7 +2080,7 @@ osync_bool if error is enough to tell if the function
 worked? Why force initialization to return a void* if, maybe, the
 initialization is not used to create a struct for data?
 * Choose one unique data field name. I found three: user_data, userdata and data
-* Plugin callback define methods in plugin
+PROPOSED* Plugin callback define methods in plugin
 (set_initialize/finalize/discovery) does not have a suffix like in
 sink and others. Maybe a osync_plugin_set_initialize_func would sound
 better.
