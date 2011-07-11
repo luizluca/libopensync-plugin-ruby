@@ -277,7 +277,6 @@ class RubyFileSync < Opensync::Plugin
 	  formatenv=info.format_env
 	  hashtable=dir.sink.hashtable
 	  path = Pathname.new(dir.path) + subdir
-
 	  #$stderr.puts path, path.entries.size, path.entries
 	  path.entries.reject {|entry| [".",".."].include?(entry.to_s)}.each do
 	    |entry|
@@ -287,7 +286,6 @@ class RubyFileSync < Opensync::Plugin
 	    else
 		relative_filename = Pathname.new(subdir) + entry
 	    end
-
 	    if File.directory?(filename)
 		if (dir.recursive?)
 		    report_dir(dir, info, relative_filename, ctx)
@@ -300,18 +298,14 @@ class RubyFileSync < Opensync::Plugin
 		change.changetype=type
 
 		hashtable.update_change(change)
-
 		next if type == Opensync::OSYNC_CHANGE_TYPE_UNMODIFIED
-
 		data=nil
 		filename.open{|io| data=io.gets(nil) }
-
 		file = FileFormat::Data.new
 		file.data = data;
 		file.size = data.size;
 		file.path = relative_filename.to_s;
 		fileformat = formatenv.find_objformat("file")
-
 		odata = Opensync::Data.new(file.to_buf, fileformat)
 		odata.objtype=dir.sink.name
 		change.data=odata
@@ -456,8 +450,9 @@ class FileFormat < Opensync::ObjectFormat
     end
 
     def _marshal(input, marshal, user_data)
-	marshal.write_string(input.path)
-	marshal.write_buffer(input.data)
+	fileformat=FileFormat::Data.from_buf(input)
+	marshal.write_string(fileformat.path)
+	marshal.write_buffer(fileformat.data)
     end
 
     def _demarshal(marshal, user_data)
@@ -501,10 +496,12 @@ end
 class FilePlainConverter < Opensync::FormatConverter
 
     def self.convert_file_to_plain(input)
+# 	$stderr.puts 123
 	[FileFormat::Data.from_buf(input).data.dup, false]
     end
 
     def self.convert_plain_to_file(input)
+#         $stderr.puts 321
 	file=FileFormat::Data.new
 	# TODO
 	file.path = Opensync::osync_rand_str(rand(100)+1)
@@ -520,11 +517,11 @@ class FilePlainConverter < Opensync::FormatConverter
 	    raise "Unable to find plain format"
 
 	# TODO: change new method in order to implicitily call the callback (or something better)
-	conv = FilePlainConverter.new(Opensync::OSYNC_CONVERTER_DECAP, file, plain, Proc.new {|converter, input, config, userdata| convert_file_to_plain(input)})
-	env.register_converter(conv)
+	conv_file2plain = FilePlainConverter.new(Opensync::OSYNC_CONVERTER_DECAP, file, plain, Proc.new {|converter, input, config, userdata| convert_file_to_plain(input)})
+	env.register_converter(conv_file2plain)
 
-	conv = FilePlainConverter.new(Opensync::OSYNC_CONVERTER_ENCAP, plain, file, Proc.new {|converter, input, config, userdata| convert_file_to_plain(input)})
-	env.register_converter(conv)
+	conv_plain2file = FilePlainConverter.new(Opensync::OSYNC_CONVERTER_ENCAP, plain, file, Proc.new {|converter, input, config, userdata| convert_plain_to_file(input)})
+	env.register_converter(conv_plain2file)
 
 	return true
     end
@@ -535,3 +532,5 @@ Opensync::MetaPlugin.register(RubyFileSync)
 Opensync::MetaFormat.register(FileFormat)
 Opensync::MetaFormat.register(PlainFormat)
 Opensync::MetaFormat.register(FilePlainConverter)
+
+# $trace=false

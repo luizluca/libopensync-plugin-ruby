@@ -19,6 +19,9 @@
 
 /* Convert Booleans  */
 #ifdef SWIGRUBY
+#define RUBY_EMBEDDED
+%initstack;
+
 %typemap(in) osync_bool {
  $1 = ($input==Qfalse ? FALSE : TRUE);
 }
@@ -43,16 +46,25 @@
   $result = rb_funcall(rb_cTime, rb_intern("at"), 1, LONG2FIX($1));
 }
 
+/* Translate into ruby string */
 %typemap(in) (char *data, unsigned int size) {
  $1 = RSTRING_PTR($input);
  $2 = (unsigned int) RSTRING_LEN($input);
 };
 
+/* Translate into ruby string */
+%typemap(in) (const void *value, unsigned int size) {
+ $1 = RSTRING_PTR($input);
+ $2 = (unsigned int) RSTRING_LEN($input);
+};
+
+/* Translate into ruby string */
 %typemap(in) (char *buffer, unsigned int size) {
  $1 = RSTRING_PTR($input);
  $2 = (unsigned int) RSTRING_LEN($input);
 };
 
+/* Convert out arguments into a single ruby value */
 %typemap(in, numinputs=0) (char **buffer, unsigned int *size) (char* temp_buffer, unsigned int temp_size) {
    $1 = &temp_buffer;
    $2 = &temp_size;
@@ -61,6 +73,24 @@
   $result = SWIG_FromCharPtrAndSize(temp_buffer$argnum, temp_size$argnum);
 };
 
+/* Convert out arguments into a single ruby value */
+%typemap(in, numinputs=0) (void **value, unsigned int *size) (void* temp_value, unsigned int temp_size) {
+   $1 = &temp_value;
+   $2 = &temp_size;
+}
+%typemap(argout) (void **value, unsigned int *size) {
+  $result = SWIG_FromCharPtrAndSize(temp_value$argnum, temp_size$argnum);
+};
+
+/* Convert out arguments into a single ruby value */
+%typemap(in, numinputs=0) (char **value) (char* temp_value) {
+   $1 = &temp_value;
+}
+%typemap(argout) (char **value) {
+  $result = SWIG_FromCharPtr(temp_value$argnum);//xxx
+};
+
+/* Convert out arguments into a single ruby value */
 %typemap(in, numinputs=0) (osync_bool *issame) (osync_bool temp_issame) {
    $1 = &temp_issame;
 }
@@ -74,12 +104,8 @@
   $1 = &error;
 }
 
-%typemap(freearg) OSyncError** error{
-
+%typemap(freearg) OSyncError** error {
   if (error$argnum) {
-/*     VALUE rb_eOSync = rb_path2class("Opensync::Error");
-*     if (rb_eOSync == Qnil)
-*       rb_eOSync = rb_eStandardError;  */
     rb_raise(rb_eStandardError, "%s",osync_error_print(&error$argnum));
     osync_error_unref(&error$argnum);
     SWIG_fail;
@@ -87,6 +113,7 @@
 }
 
 /* Convert each syncList to its own type for each method*/
+/* TODO: complete this list */
 %typemap(out) OSyncList* %{
   VALUE array = rb_ary_new();
   OSyncList *list, *item;
@@ -176,4 +203,3 @@ typedef enum {
 %include "opensync/helper/opensync_sink_state_db.h"
 %include "opensync/helper/opensync_hashtable.h"
 %include "opensync/version/opensync_version.h"
-

@@ -582,7 +582,8 @@ if $trace
         msg="RUBY #{klass}.#{id} #{$!}\n#{$!.backtrace.join("\n")}"
     when "call", "c-call"
 	type=Opensync::TRACE_ENTRY
-        args=binding.eval("local_variables.collect {|var| var }.collect{|var| eval(var.to_s)}")
+        #args=binding.eval("local_variables.collect {|var| var }.collect{|var| eval(var.to_s)}")
+	args=["???"]
 	id_s=id.to_s
 	case
 	when (id_s[-1,1] == "=" and args.size==1)
