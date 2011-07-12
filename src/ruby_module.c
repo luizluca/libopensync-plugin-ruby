@@ -19,9 +19,9 @@
  */
 
 // TODO: study ruby memory managment and fix any memory leaks
-
-// TODO Call free after any unregister
-// BUG: all ruby calls must run inside a single thread (working on it)
+// TODO Call free after any unregister. Maybe done
+// DONE: all ruby calls must run inside a single thread (working on it)
+// TODO: conversion is not working. opensync is still getting the data objtype.
 
 #include "ruby_module.h"
 
@@ -76,7 +76,7 @@ extern void *STACK_END_ADDRESS;
 #define STR(args...)	#args
 
 // #define DEBUG_MUTEX
-#define DEBUG_THREAD
+// #define DEBUG_THREAD
 #define DEBUG_FCALL
 
 #ifdef DEBUG_MUTEX
@@ -652,5 +652,5 @@ objformat?
 // osync_caps_converter_new and osync_converter_new ????
 // file-sync does not "osync_trace ( TRACE_EXIT, "%s: true", __func__);"
 // BUG: Even if demarshal fails, it accepts the sync
-
+// BUG: double random at 	file->path = osync_rand_str(g_random_int_range(1, 100), error);
 

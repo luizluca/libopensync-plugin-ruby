@@ -87,7 +87,7 @@
    $1 = &temp_value;
 }
 %typemap(argout) (char **value) {
-  $result = SWIG_FromCharPtr(temp_value$argnum);//xxx
+  $result = SWIG_FromCharPtr(temp_value$argnum);
 };
 
 /* Convert out arguments into a single ruby value */

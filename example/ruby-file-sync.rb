@@ -112,6 +112,7 @@
 require "pathname"
 
 class RubyFileSync < Opensync::Plugin
+      ID="ruby-file-sync"
       class Dir
 	  attr_accessor :env, :sink, :recursive, :path
       end
@@ -124,7 +125,7 @@ class RubyFileSync < Opensync::Plugin
       end
 
       def initialize_new
-	  self.name="ruby-file-sync"
+	  self.name=ID
 	  self.longname="File Synchronization Plugin"
 	  self.description="Plugin to synchronize files on the local filesystem"
 	  self.initialize_func {|plugin, info| initialize0(info)}
@@ -160,8 +161,8 @@ class RubyFileSync < Opensync::Plugin
 		objformat = sink.objformat
 
 		# TODO: Implement objformat sanity check in OpenSync Core
-		if objformat != "file"
-		    raise Opensync::OsyncMisconfigurationError.new("Format \"#{objformat}\" is not supported by file-sync. Only Format \"file\" is currently supported by the file-sync plugin.")
+		if objformat != FileFormat::ID
+		    raise Opensync::OsyncMisconfigurationError.new("Format \"#{objformat}\" is not supported by file-sync. Only Format \"#{FileFormat::ID}\" is currently supported by the file-sync plugin.")
 		end
 	    end
 
@@ -232,7 +233,7 @@ class RubyFileSync < Opensync::Plugin
 	  file.size = data.size;
 	  file.path = change.uid;
 
-	  fileformat = formatenv.find_objformat("file")
+	  fileformat = formatenv.find_objformat(FileFormat::ID)
 	  odata = Opensync::Data.new(file, fileformat)
 	  odata.objtype=sink.name
 	  change.data=odata
@@ -305,7 +306,7 @@ class RubyFileSync < Opensync::Plugin
 		file.data = data;
 		file.size = data.size;
 		file.path = relative_filename.to_s;
-		fileformat = formatenv.find_objformat("file")
+		fileformat = formatenv.find_objformat(FileFormat::ID)
 		odata = Opensync::Data.new(file.to_buf, fileformat)
 		odata.objtype=dir.sink.name
 		change.data=odata
@@ -330,7 +331,7 @@ class RubyFileSync < Opensync::Plugin
 	      change.uid=uid
 	      change.changetype = Opensync::OSYNC_CHANGE_TYPE_DELETED
 
-	      fileformat = format_env.find_objformat("file")
+	      fileformat = format_env.find_objformat(FileFormat::ID)
 	      odata = Opensync::Data.new("", fileformat)
 	      odata.objtype=sink.name
 	      change.data=odata
@@ -373,6 +374,7 @@ class RubyFileSync < Opensync::Plugin
 end
 
 class FileFormat < Opensync::ObjectFormat
+    ID="ruby_file"
     class Data
 	attr_accessor :mode, :userid, :groupid, :last_mod, :path, :data, :size
 
@@ -389,16 +391,23 @@ class FileFormat < Opensync::ObjectFormat
 	end
 
 	def to_buf
-	    Marshal.dump(self)
+	    buf=Marshal.dump(self)
+# 	    $stderr.puts "",self,buf
+	    buf
 	end
 
-	def self.from_buf(string)
-	    Marshal.load(string)
+	def self.from_buf(buf)
+# 	    $stderr.puts "",buf
+	    Marshal.load(buf)
+	end
+
+	def ==(obj)
+	    self.marshal_dump==obj.marshal_dump
 	end
     end
 
     def self.get_format_info(env)
-	format = self.new("file", "data")
+	format = self.new(ID, "data")
 	env.register_objformat(format)
     end
 
@@ -464,6 +473,10 @@ class FileFormat < Opensync::ObjectFormat
 end
 
 class PlainFormat < Opensync::ObjectFormat
+    ID="ruby_plain"
+    MEMO_ID="ruby_memo"
+
+
     def initialize_new(name, objtype)
 	self.compare_func=callback{|format, *args| self._compare(*args) }
 	self.copy_func=callback{|format, *args| self._copy(*args) }
@@ -485,10 +498,11 @@ class PlainFormat < Opensync::ObjectFormat
     end
 
     def self.get_format_info(env)
-	format = self.new("plain", "data")
+	#format = self.new(ID, "data")
+	format = self.new(ID, "contact")
 	env.register_objformat(format)
 	# "memo" is the same as "plain" expect the object type is fixed to "note"
-	format = self.new("memo", "note")
+	format = self.new(MEMO_ID, "note")
 	env.register_objformat(format)
     end
 end
@@ -504,17 +518,18 @@ class FilePlainConverter < Opensync::FormatConverter
 #         $stderr.puts 321
 	file=FileFormat::Data.new
 	# TODO
-	file.path = Opensync::osync_rand_str(rand(100)+1)
-	file.data = input;
+	#file.path = Opensync::osync_rand_str(rand(100)+1)
+	file.path = String::random_string(rand(100)+1)
+	file.data = input.dup;
 	file.size = input.size;
 	[file.to_buf, false]
     end
 
     def self.get_conversion_info(env)
-	file = env.find_objformat("file") or
-	    raise "Unable to find file format"
-	plain = env.find_objformat("plain") or
-	    raise "Unable to find plain format"
+	file = env.find_objformat(FileFormat::ID) or
+	    raise "Unable to find ruby_file format"
+	plain = env.find_objformat(PlainFormat::ID) or
+	    raise "Unable to find ruby_plain format"
 
 	# TODO: change new method in order to implicitily call the callback (or something better)
 	conv_file2plain = FilePlainConverter.new(Opensync::OSYNC_CONVERTER_DECAP, file, plain, Proc.new {|converter, input, config, userdata| convert_file_to_plain(input)})

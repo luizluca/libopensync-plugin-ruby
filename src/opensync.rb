@@ -22,7 +22,7 @@ require "thread"
 require "set"
 require "pathname"
 
-# GC.disable
+GC.disable
 #$stderr.puts GC.count
 #GC.stress=true
 
@@ -35,6 +35,16 @@ end
 # XXX: HACK!, I cannot access ENV on a callback.
 #      it raises "ENV.[] no such file to load -- enc/ansi_x3_4_1968.so"
 ENV2=Hash[ENV]
+
+class String
+    RANDOM_CHARS='abcdefghijklmnopqrstuvwxyzABCDEFGHIKLMNOPQRSTUVWXYZ1234567890'
+    # reimplement osync_rand_str
+    def self.random_string(length)
+        result = ''
+        length.times { result << RANDOM_CHARS[rand(RANDOM_CHARS.size)] }
+        result
+    end
+end
 
 module Opensync
 
@@ -582,8 +592,8 @@ if $trace
         msg="RUBY #{klass}.#{id} #{$!}\n#{$!.backtrace.join("\n")}"
     when "call", "c-call"
 	type=Opensync::TRACE_ENTRY
-        #args=binding.eval("local_variables.collect {|var| var }.collect{|var| eval(var.to_s)}")
-	args=["???"]
+        args=binding.eval("local_variables.collect {|var| var }.collect{|var| eval(var.to_s)}")
+# 	args=["???"]
 	id_s=id.to_s
 	case
 	when (id_s[-1,1] == "=" and args.size==1)

@@ -404,8 +404,9 @@ define_callback "osync_objformat_set_copy_func",
 	osync_error_set ( error, OSYNC_ERROR_GENERIC, "The result should be a String!\n" );
 	goto error;
     }
-    *output = RSTRING_PTR ( ruby_result );
     *outputsize = RSTRING_LEN ( ruby_result );
+    *output     = malloc(*outputsize);
+    memcpy(*output, RSTRING_PTR ( ruby_result ), *outputsize);
     result = TRUE;
 EOF
 
@@ -421,9 +422,10 @@ define_callback "osync_objformat_set_duplicate_func",
         osync_error_set ( error, OSYNC_ERROR_GENERIC, "The result should be an Array with [newuid:string, output:string, dirty:bool] !\n" );
         goto error;
     }
-    *newuid 	= RSTRING_PTR ( rb_ary_entry ( ruby_result, 0 ) );
-    *output 	= RSTRING_PTR ( rb_ary_entry ( ruby_result, 1 ) );
-    *outputsize = RSTRING_LEN ( rb_ary_entry ( ruby_result, 1 ) );
+    *newuid 	= strdup(RSTRING_PTR ( rb_ary_entry ( ruby_result, 0 ) ));
+    *outputsize = RSTRING_LEN ( ruby_result );
+    *output     = malloc(*outputsize);
+    memcpy(*output, RSTRING_PTR ( ruby_result ), *outputsize);
     *dirty  	= RBOOL ( rb_ary_entry ( ruby_result, 2 ) );
     result 	= TRUE;
 EOF
@@ -436,8 +438,9 @@ define_callback "osync_objformat_set_create_func",
         osync_error_set ( error, OSYNC_ERROR_GENERIC, "The result should be a String!\n" );
         goto error;
     }
-    *data = RSTRING_PTR ( ruby_result );
     *size = RSTRING_LEN ( ruby_result );
+    *data     = malloc(*size);
+    memcpy(*data, RSTRING_PTR ( ruby_result ), *size);
     result = TRUE;
 EOF
 
@@ -487,8 +490,9 @@ define_callback "osync_objformat_set_demarshal_func",
         osync_error_set ( error, OSYNC_ERROR_GENERIC, "The result should be a String!\n" );
         goto error;
     }
-    *output 	= RSTRING_PTR ( ruby_result );
     *outputsize = RSTRING_LEN ( ruby_result );
+    *output     = malloc(*outputsize);
+    memcpy(*output, RSTRING_PTR ( ruby_result ), *outputsize);
     result 	= TRUE;
 EOF
 
