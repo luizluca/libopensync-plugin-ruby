@@ -24,8 +24,6 @@ static struct threaded_funcall funcall_data = {NULL, NULL, NULL};
 
 EOF
 
-
-
 class String
     def trim
 	return self.sub(/^[[:blank:]]/,"").sub(/[[:blank:]]$/,"")
@@ -389,7 +387,7 @@ define_callback "osync_objformat_set_compare_func",
          osync_error_set ( error, OSYNC_ERROR_GENERIC, "The result should be a FixNum!\n" );
          goto error;
      }
-     result = FIX2INT ( result );
+     result = FIX2INT ( ruby_result );
 EOF
 
 # typedef osync_bool (* OSyncFormatCopyFunc) (OSyncObjFormat *format, const char *input, unsigned int inpsize, char **output, unsigned int *outpsize, void *user_data, OSyncError **error);

@@ -428,7 +428,6 @@ class FileFormat < Opensync::ObjectFormat
     def _compare(leftdata, rightdata, user_data)
       	leftfile = FileFormat::Data.from_buf(leftdata);
 	rightfile = FileFormat::Data.from_buf(rightdata);
-
 	return Opensync::OSYNC_CONV_DATA_MISMATCH if not leftfile.path == rightfile.path
 	return Opensync::OSYNC_CONV_DATA_SIMILAR  if not leftfile.size == rightfile.size
 	return Opensync::OSYNC_CONV_DATA_SIMILAR  if leftfile.size>0 and not leftfile.data == rightfile.data

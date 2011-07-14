@@ -22,6 +22,9 @@
 // TODO Call free after any unregister. Maybe done
 // DONE: all ruby calls must run inside a single thread (working on it)
 // TODO: conversion is not working. opensync is still getting the data objtype.
+// BUG: deadlock in --sync testme
+// BUG: EXIT_ERROR: osync_rubymodule_objtype_sink_get_changes_run: (null) when removed /tmp/sync2/* (second get_changes does not run correcly)
+// TODO: protect ruby with rb_protect
 
 #include "ruby_module.h"
 
@@ -77,7 +80,7 @@ extern void *STACK_END_ADDRESS;
 
 // #define DEBUG_MUTEX
 // #define DEBUG_THREAD
-#define DEBUG_FCALL
+// #define DEBUG_FCALL
 
 #ifdef DEBUG_MUTEX
 #define pthread_mutex_lock(mutex) fprintf(stderr, "DEBUG_MUTEX[%lu]: Locking " #mutex " at %s:%i\n",pthread_self(),__func__,__LINE__);pthread_mutex_lock(mutex);fprintf(stderr, "DEBUG_MUTEX[%lu]: Locked " #mutex " at %s:%i\n",pthread_self(),__func__,__LINE__);
