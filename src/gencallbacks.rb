@@ -121,7 +121,46 @@ def define_rubycall(func_name, signature, argins, logic)
 puts <<EOF
 /*
  * TODO: desc
- */
+ *//*
+VALUE #{func_name}_protected(VALUE *args) {
+    osync_trace ( TRACE_ENTRY, "%s(...)", __func__);
+    int ruby_error = 0;
+    VALUE ruby_args[#{argins.size}];
+#{
+    code=[]
+    argins.each_index do
+      |i|
+      type=arg_type[argins[i]]
+      case type
+      when "char*", "const char*"
+        if arg_type.include?("#{argins[i]}size")
+	  assign="SWIG_FromCharPtrAndSize (#{argins[i]}, #{argins[i]}size)"
+	elsif arg_type.include?("size")
+          assign="SWIG_FromCharPtrAndSize (#{argins[i]}, size)"
+	else
+          assign="SWIG_FromCharPtr(#{argins[i]})"
+        end
+      when "void*"
+        assign="(#{argins[i]}==NULL?Qnil:*(VALUE*)#{argins[i]})"
+      when "osync_bool"
+        assign="BOOLR(#{argins[i]})"
+      else
+	assign="SWIG_NewPointerObj( #{argins[i]}, SWIG_TypeQuery(\"#{arg_type[argins[i]]}\"), 0 |  0 )"
+      end
+      code <<"    ruby_args[#{i}]=#{assign};"
+    end
+    code.join("\n")
+}
+#{logic}
+    osync_trace ( TRACE_EXIT, \"%s:\", __func__);
+    goto exit;
+error:
+    osync_trace ( TRACE_EXIT_ERROR, "%s: %s", __func__, osync_error_print (error) );
+exit:
+    #{has_error ? "" : "osync_error_unref(error);" }
+    #{has_result ? "return result;": "return;"}
+}*/
+
 #{result_type} #{func_name}_run(#{args.collect{|typename| typename.join(" ")}.join(", ")}) {
     osync_trace ( TRACE_ENTRY, "%s(#{format_for(args)})", __func__, #{args.collect {|(type,name)| name}.join(", ")});
     int ruby_error = 0;
@@ -170,13 +209,12 @@ void #{func_name}_load_and_run() {
     osync_trace ( TRACE_ENTRY, "%s()", __func__);
     #{has_result ? "#{result_type} result = (#{result_type})0;" : "/* no result */" }
     #{result_type}* result_ptr = (#{result_type}*)0;
-    int nargs = funcall_data.nargs;
-    struct arg_desc *args = funcall_data.args;
+    void* *args = funcall_data.args;
     /* loading args */
 #{
     code=[]
     args.each_index {|i|
-       code<<"    #{args[i][0]} #{args[i][1]} = *((#{args[i][0]}*)args[#{i}].ptr);"
+       code<<"    #{args[i][0]} #{args[i][1]} = *((#{args[i][0]}*)args[#{i}]);"
     }
     code.join("\n")
 }
@@ -189,25 +227,17 @@ void #{func_name}_load_and_run() {
     return;
 }
 
-#{result_type} #{func_name}(#{args.collect{|typename| typename.join(" ")}.join(", ")}) {
+#{result_type} #{func_name}_save_and_request(#{args.collect{|typename| typename.join(" ")}.join(", ")}) {
     osync_trace ( TRACE_ENTRY, "%s(#{format_for(args)})", __func__, #{args.collect {|(type,name)| name}.join(", ")});
     #{has_result ? "#{result_type} result;" : "/* no result */" }
-    struct arg_desc args[#{args.size}];
+    void* args[#{args.size}];
     /* init ruby, if needed */
     rubymodule_ruby_needed();
-
-    if (is_rubythread()) {
-      debug_thread("Called from ruby. No need to worry with locks.\\n");
-      /* If we are running inside the rubythread, there is no need to worry*/
-      #{has_result ? "result =" : ""} #{func_name}_run(#{args.collect{|(type,name)| name}.join(", ")});
-      goto exit;
-    }
 
 #{  code=[]
     code << "    /* saving args */"
     args.each_index {|i|
-      code << "    args[#{i}].ptr=&#{args[i][1]};"
-      code << "    args[#{i}].type=\"#{args[i][0]}\";"
+      code << "    args[#{i}]=&#{args[i][1]};"
     }
     code.join("\n")
 }
@@ -225,7 +255,6 @@ void #{func_name}_load_and_run() {
       pthread_cond_wait(&fcall_free, &ruby_context_lock);
       debug_thread("Now funcall is mine!\\n");
     }
-    funcall_data.nargs  = #{args.size};
     funcall_data.args 	= args;
     funcall_data.func   = #{func_name}_load_and_run;
     funcall_data.result = NULL;
@@ -249,6 +278,23 @@ exit:
     #{has_result ? "return result;" : "return;" }
 };
 
+#{result_type} #{func_name}(#{args.collect{|typename| typename.join(" ")}.join(", ")}) {
+    osync_trace ( TRACE_ENTRY, "%s(#{format_for(args)})", __func__, #{args.collect {|(type,name)| name}.join(", ")});
+    #{has_result ? "#{result_type} result;" : "/* no result */" }
+    /* init ruby, if needed */
+    rubymodule_ruby_needed();
+
+    if (is_rubythread()) {
+      debug_thread("Called from ruby thread. No need to worry with locks.\\n");
+      /* If we are running inside the rubythread, there is no need to worry*/
+      #{has_result ? "result =" : ""} #{func_name}_run(#{args.collect{|(type,name)| name}.join(", ")});
+    } else {
+      debug_thread("Called from outside rubythread. Pass to ruby thread.\\n");
+      #{has_result ? "result =" : ""} #{func_name}_save_and_request(#{args.collect{|(type,name)| name}.join(", ")});
+    }
+exit:
+    #{has_result ? "return result;" : "return;" }
+}
 EOF
 end
 
@@ -268,17 +314,12 @@ void rubymodule_ruby_needed();
 
 struct threaded_funcall;
 typedef void (* threaded_func) ();
-struct arg_desc {
-  const char   *type;
-  void	       *ptr;
-};
 struct threaded_funcall {
    threaded_func 	func;
-   int 			nargs;
-   struct arg_desc	*args;
+   void*		*args;
    void   		*result;
 };
-static struct threaded_funcall funcall_data = {0, 0, NULL, NULL};
+static struct threaded_funcall funcall_data = {NULL, NULL, NULL};
 
 EOF
 
