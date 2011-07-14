@@ -221,17 +221,17 @@ class RubyFileSync < Opensync::Plugin
 	  filename = Pathname.new(dir.path) + tmp
 
 	  data=nil
-	  filename.open{|io| data=io.gets(nil) }
-
 	  file = FileFormat::FileFormat::Data.new
-	  stat = file.stat
-	  file.userid = stat.uid
-	  file.groupid = stat.gid;
-	  file.mode = stat.mode;
-	  file.last_mod = stat.mtime;
-	  file.data = data;
-	  file.size = data.size;
-	  file.path = change.uid;
+	  filename.open do|io|
+	      file.data     = io.gets(nil);
+	      file.path     = change.uid;
+	      stat = io.stat
+	      file.userid   = stat.uid
+	      file.groupid  = stat.gid;
+	      file.mode     = stat.mode;
+	      file.last_mod = stat.mtime;
+	      file.size     = file.data.size;
+	  end
 
 	  fileformat = formatenv.find_objformat(FileFormat::ID)
 	  odata = Opensync::Data.new(file, fileformat)
@@ -242,11 +242,9 @@ class RubyFileSync < Opensync::Plugin
       end
 
       def write(sink, info, ctx, change, userdata)
-
 	  dir=userdata
 	  tmp = filename_scape_characters(change.uid)
 	  filename = Pathname.new(dir.path) + tmp
-
 	  case change.changetype
 	  when Opensync::OSYNC_CHANGE_TYPE_DELETED
 	      File.unlink(filename)
@@ -255,6 +253,7 @@ class RubyFileSync < Opensync::Plugin
 	      when Opensync::OSYNC_CHANGE_TYPE_ADDED
 		  if File.exist?(filename)
 		      change.uid="#{change.uid}-new"
+		      # BUG? should it return?
 		      write(sink, info, ctx, change, userdata)
 		  end
 	      end
@@ -268,7 +267,9 @@ class RubyFileSync < Opensync::Plugin
 	      # ??? osync_file_write (filename, file.data, file.size, file.mode)
 	      File.open(filename, "w") {|io|
 		  io.print(file.data)
-	          io.chmod(file.mode)
+		  # Maybe this does not make sense as it comes from convert_plain_to_file
+		  # that destroys any evidence of the file mode
+ 	          io.chmod(file.mode) if file.mode
 	      }
 	end
 	return TRUE
@@ -300,12 +301,13 @@ class RubyFileSync < Opensync::Plugin
 
 		hashtable.update_change(change)
 		next if type == Opensync::OSYNC_CHANGE_TYPE_UNMODIFIED
-		data=nil
-		filename.open{|io| data=io.gets(nil) }
+
 		file = FileFormat::Data.new
-		file.data = data;
-		file.size = data.size;
-		file.path = relative_filename.to_s;
+		filename.open{|io|
+		    file.data     = io.gets(nil)
+		    file.size     = file.data.size
+		    file.path     = relative_filename.to_s
+		}
 		fileformat = formatenv.find_objformat(FileFormat::ID)
 		odata = Opensync::Data.new(file.to_buf, fileformat)
 		odata.objtype=dir.sink.name
@@ -352,17 +354,14 @@ class RubyFileSync < Opensync::Plugin
       def commit_func(sink, info, ctx, change, userdata)
 	  dir=userdata
 	  hashtable=sink.hashtable
-
 	  write(sink, info, ctx, change, userdata)
 	  filename="#{dir.path}/#{filename_scape_characters(change.uid)}"
-
 	  if change.changetype != Opensync::OSYNC_CHANGE_TYPE_DELETED
 		hash = generate_hash(File.new(filename));
 		change.hash=hash
 	  end
-
 	  hashtable.update_change(change)
-	  context.report_sucess
+	  ctx.report_success
       end
 
       def sync_done(sink, info, ctx, userdata)
@@ -498,8 +497,7 @@ class PlainFormat < Opensync::ObjectFormat
     end
 
     def self.get_format_info(env)
-	#format = self.new(ID, "data")
-	format = self.new(ID, "contact")
+	format = self.new(ID, "data")
 	env.register_objformat(format)
 	# "memo" is the same as "plain" expect the object type is fixed to "note"
 	format = self.new(MEMO_ID, "note")
