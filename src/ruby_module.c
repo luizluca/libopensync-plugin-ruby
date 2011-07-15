@@ -20,11 +20,6 @@
 
 // TODO: study ruby memory managment and fix any memory leaks
 // TODO Call free after any unregister. Maybe done
-// DONE: all ruby calls must run inside a single thread (working on it)
-// TODO: conversion is not working. opensync is still getting the data objtype.
-// BUG: deadlock in --sync testme
-// BUG: EXIT_ERROR: osync_rubymodule_objtype_sink_get_changes_run: (null) when removed /tmp/sync2/* (second get_changes does not run correcly)
-// TODO: protect ruby with rb_protect
 
 #include "ruby_module.h"
 
@@ -339,7 +334,7 @@ VALUE rb_get_format_info(VALUE format_env) {
 }
 
 // Include generated code for callbacks and rubycalls
-#include "callbacks.c"
+#include "callbacks.inc"
 
 /** Plugin */
 

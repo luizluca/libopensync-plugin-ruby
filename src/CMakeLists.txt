@@ -8,18 +8,27 @@ cmake_policy(VERSION 2.6)
 ADD_DEFINITIONS( -DOPENSYNC_RUBYPLUGIN_DIR="${OPENSYNC_PLUGINDIR}" )
 ADD_DEFINITIONS( -DOPENSYNC_RUBYFORMATS_DIR="${OPENSYNC_FORMATSDIR}" )
 
+IF (WIN32)
+        # Execute Win32 Specific commands - none yet.
+ELSE (WIN32)
+        # Execute commands for other platforms
+        ADD_CUSTOM_COMMAND(
+                OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/callbacks.inc
+                COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/gencallbacks.rb > ${CMAKE_CURRENT_BINARY_DIR}/callbacks.inc
+                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                COMMENT "Generate callback code"
+                )
+ENDIF (WIN32)
+
 # TODO: How to make swig not build opensync.so.so???
 SWIG_ADD_MODULE( opensync-swig ruby opensync.i )
-SWIG_LINK_LIBRARIES( opensync-swig opensync ${RUBY_LIBRARY} ${GLIB2_LIBRARIES} ${LIBXML2_LIBRARIES} )
-# Avoid this to be considered a plugin/format module
+# HACK: Rename swig module in order to ignore it as a plugin/format module
 SET_TARGET_PROPERTIES(${SWIG_MODULE_opensync-swig_REAL_NAME} PROPERTIES SUFFIX ".tmp")
-#SET_SOURCE_FILES_PROPERTIES( ${swig_generated_file_fullname}
-#        PROPERTIES COMPILE_FLAGS "-S")
 
 # Include SWIG in include in order to compile it with ruby_module
 INCLUDE_DIRECTORIES( ${swig_outdir} )
 
-OPENSYNC_PLUGIN_ADD( ruby-module ruby_module.c )
+OPENSYNC_PLUGIN_ADD( ruby-module ruby_module.c opensync.i ${CMAKE_CURRENT_BINARY_DIR}/callbacks.inc)
 
 TARGET_LINK_LIBRARIES( ruby-module ${OPENSYNC_LIBRARIES} ${GLIB2_LIBRARIES} ${LIBXML2_LIBRARIES} ${RUBY_LIBRARY})
 
