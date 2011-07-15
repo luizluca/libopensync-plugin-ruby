@@ -106,6 +106,7 @@ RUBY_GLOBAL_SETUP
 
 /* This mutex avoids concurrent use of ruby context (which is prohibit) */
 static pthread_mutex_t 	ruby_context_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t 	ruby_call_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t 	rubymodule_data_lock = PTHREAD_MUTEX_INITIALIZER;
 //static pthread_t     	main_thread;
 static pthread_t     	ruby_thread = 0;
@@ -115,12 +116,20 @@ static osync_bool      	ruby_started = FALSE;
 pthread_cond_t 		fcall_ruby_running = PTHREAD_COND_INITIALIZER;
 pthread_cond_t 		fcall_requested = PTHREAD_COND_INITIALIZER;
 pthread_cond_t 		fcall_returned = PTHREAD_COND_INITIALIZER;
-pthread_cond_t 		fcall_free = PTHREAD_COND_INITIALIZER;
 
 static pthread_t 	ruby_thread;
 static pthread_attr_t 	attr;
 
 GHashTable 		*rubymodule_data;
+
+struct threaded_funcall;
+typedef void (* threaded_func) ();
+struct threaded_funcall {
+   threaded_func 	func;
+   void*		*args;
+   void   		*result;
+};
+static struct threaded_funcall funcall_data = {NULL, NULL, NULL};
 
 void rubymodule_ruby_needed();
 
@@ -136,9 +145,9 @@ VALUE rb_funcall2_wrapper ( VALUE* params ) {
     result = rb_funcall2 ( params[0], rb_intern ( ( char* ) params[1] ), ( int ) params[2], ( VALUE* ) params[3] );
     debug_fcall("returned!");
 
-//     debug_fcall("GarbageCollecting...");
-//     rb_funcall (rb_mGC, rb_intern ("start"), 0,  NULL);
-//     debug_fcall("done!");
+    debug_fcall("GarbageCollecting...");
+    rb_funcall (rb_mGC, rb_intern ("start"), 0,  NULL);
+    debug_fcall("done!");
 
     debug_fcall("\n");
     return result;
@@ -156,10 +165,24 @@ static VALUE rb_funcall2_protected ( VALUE recv, const char* method, int argc, V
     return result;
 }
 
-static char * osync_rubymodule_error_bt ( char* file, const char* func, int line ) {
+#define osync_rubymodule_error_set(error, type, msg) \
+        osync_error_set (error, type, "(RUBY) " msg "\n%s\n        from %s:%u:in `%s'", \
+                          osync_rubymodule_error_bt(), __FILE__, __LINE__, __func__);
+#define osync_rubymodule_error_set_args(error, type, msg, args...) \
+        osync_error_set (error, type, "(RUBY) " msg "\n%s\n        from %s:%u:in `%s'", args, \
+                          osync_rubymodule_error_bt(), __FILE__, __LINE__, __func__);
+static char * osync_rubymodule_error_bt ( ) {
     VALUE message;
     int state;
-    message = rb_protect ( ( VALUE ( * ) ( VALUE ) ) rb_eval_string, ( VALUE ) ( "bt=$!.backtrace; bt[0]=\"#{bt[0]}: #{$!} (#{$!.class})\"; bt.join('\n')" ),&state );
+
+    const char *rb_error_code =
+    "bt=$!.backtrace;"
+    "bt << \"C-code:???\" if bt.empty?; "
+    "$stderr.puts 1,bt.size;"
+    "bt[0]=\"#{bt[0]}: #{$!} (#{$!.class})\";"
+    "bt.join('\n        from ');";
+
+    message = rb_protect ( ( VALUE ( * ) ( VALUE ) ) rb_eval_string, ( VALUE )rb_error_code, &state );
     if ( state!=0 ) {
         return "Unable to obtain BT!";
     }
@@ -291,45 +314,6 @@ static void free_plugin_data ( VALUE *data ) {
     free(data);
 }
 
-/* Converter */
-static osync_bool osync_rubymodule_converter_convert (OSyncFormatConverter *conv,  char *input, unsigned int inpsize, char **output, unsigned int *outpsize, osync_bool *free_input, const char *config, void *user_data, OSyncError **error ) {
-        int status;
-    osync_trace ( TRACE_ENTRY, "%s(%p)", __func__, error );
-
-    VALUE callback = osync_rubymodule_get_data ( conv, "convert_func" );
-
-
-    VALUE args[4];
-    args[0] = SWIG_NewPointerObj ( SWIG_as_voidptr ( conv ), SWIGTYPE_p_OSyncFormatConverter, 0 |  0 );
-    args[1] = SWIG_FromCharPtrAndSize ( input, inpsize );
-    args[2] = SWIG_FromCharPtr ( config );
-    args[3] = IND_VALUE(user_data);
-    VALUE result = rb_funcall2_protected ( callback, "call", 4, args, &status );
-    if ( status!=0 ) {
-        osync_error_set ( error, OSYNC_ERROR_INITIALIZATION, "Failed to call converter convert function!\n%s",
-                          osync_rubymodule_error_bt ( __FILE__, __func__,__LINE__ ) );
-        goto error;
-    }
-    if ( !IS_ARRAY ( result ) || ( RARRAY_LEN ( result ) != 2 ) ||
-            !IS_STRING ( rb_ary_entry ( result, 0 ) ) ||
-            !IS_BOOL ( rb_ary_entry ( result, 1 ) )
-       ) {
-        osync_error_set ( error, OSYNC_ERROR_GENERIC, "The result should of print should be an Array with [output:string, free_input:bool] !\n" );
-        goto error;
-    }
-
-    *output = RSTRING_PTR ( rb_ary_entry ( result, 0 ) );
-    *outpsize = RSTRING_LEN ( rb_ary_entry ( result, 0 ) );
-    *free_input  = RBOOL ( rb_ary_entry ( result, 1 ) );
-
-    osync_trace ( TRACE_EXIT, "%s: true", __func__ );
-    return TRUE;
-error:
-
-    osync_trace ( TRACE_EXIT_ERROR, "%s: %s", __func__, osync_error_print ( error ) );
-    return FALSE;
-}
-
 VALUE rb_load_basefile(const char *filename) {
     return rb_require(RUBY_BASE_FILE);
 }
@@ -354,6 +338,7 @@ VALUE rb_get_format_info(VALUE format_env) {
     return rb_funcall(meta_class,rb_intern("get_format_info"), 1, format_env);
 }
 
+// Include generated code for callbacks and rubycalls
 #include "callbacks.c"
 
 /** Plugin */
@@ -613,7 +598,7 @@ void rubymodule_ruby_needed() {
        pthread_attr_t attr;
        pthread_attr_init(&attr);
        pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-       pthread_attr_setstacksize (&attr, 100*1000*1000);
+       //pthread_attr_setstacksize (&attr, 100*1000*1000);
        rc = pthread_create(&ruby_thread, NULL, rubymodule_ruby_thread, NULL);
        if (rc){
            fprintf(stderr,"ERROR; return code from pthread_create() is %d\n", rc);
@@ -656,4 +641,5 @@ objformat?
 // file-sync does not "osync_trace ( TRACE_EXIT, "%s: true", __func__);"
 // BUG: Even if demarshal fails, it accepts the sync
 // BUG: double random at 	file->path = osync_rand_str(g_random_int_range(1, 100), error);
-
+// Add error for every callback
+// BUG: osynctool does not show error when failed conversion, get_change

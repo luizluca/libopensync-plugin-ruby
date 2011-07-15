@@ -138,8 +138,10 @@
     rb_ary_push(array, SWIG_NewPointerObj(SWIG_as_voidptr(item->data), SWIGTYPE_p_OSyncObjFormatSink, 0 |  0 ));
 #elif defined(osync_objtype_sink_get_objformat_sinks)
     rb_ary_push(array, SWIG_NewPointerObj(SWIG_as_voidptr(item->data), SWIGTYPE_p_OSyncObjFormatSink, 0 |  0 ));
+#elif defined(osync_hashtable_get_deleted)
+    rb_ary_push(array, SWIG_FromCharPtr(SWIG_as_voidptr(item->data)));
 #else
-    rb_exc_raise(rb_exc_new2(rb_eArgError, "SWIG typemap for '$symname' is not implemented yet. Add it to swig interface"));
+    rb_exc_raise(rb_exc_new2(rb_eArgError, "SWIG typemap for OSyncList in '$symname' is not implemented yet. Add it to swig interface"));
 #endif
 #undef $symname
   }
