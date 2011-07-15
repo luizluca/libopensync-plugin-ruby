@@ -334,7 +334,7 @@ VALUE rb_get_format_info(VALUE format_env) {
 }
 
 // Include generated code for callbacks and rubycalls
-#include "callbacks.inc"
+#include "callbacks.h"
 
 /** Plugin */
 

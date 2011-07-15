@@ -13,10 +13,11 @@ IF (WIN32)
 ELSE (WIN32)
         # Execute commands for other platforms
         ADD_CUSTOM_COMMAND(
-                OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/callbacks.inc
-                COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/gencallbacks.rb > ${CMAKE_CURRENT_BINARY_DIR}/callbacks.inc
+                OUTPUT  ${CMAKE_CURRENT_BINARY_DIR}/callbacks.h
+                COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/gencallbacks.rb > ${CMAKE_CURRENT_BINARY_DIR}/callbacks.h
                 WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
                 COMMENT "Generate callback code"
+		MAIN_DEPENDENCY ${CMAKE_CURRENT_SOURCE_DIR}/gencallbacks.rb
                 )
 ENDIF (WIN32)
 
@@ -28,7 +29,7 @@ SET_TARGET_PROPERTIES(${SWIG_MODULE_opensync-swig_REAL_NAME} PROPERTIES SUFFIX "
 # Include SWIG in include in order to compile it with ruby_module
 INCLUDE_DIRECTORIES( ${swig_outdir} )
 
-OPENSYNC_PLUGIN_ADD( ruby-module ruby_module.c opensync.i ${CMAKE_CURRENT_BINARY_DIR}/callbacks.inc)
+OPENSYNC_PLUGIN_ADD( ruby-module ruby_module.c opensync.i ${CMAKE_CURRENT_BINARY_DIR}/callbacks.h)
 
 TARGET_LINK_LIBRARIES( ruby-module ${OPENSYNC_LIBRARIES} ${GLIB2_LIBRARIES} ${LIBXML2_LIBRARIES} ${RUBY_LIBRARY})
 
