@@ -113,7 +113,7 @@ pthread_cond_t 		fcall_requested = PTHREAD_COND_INITIALIZER;
 pthread_cond_t 		fcall_returned = PTHREAD_COND_INITIALIZER;
 
 static pthread_t 	ruby_thread;
-static pthread_attr_t 	attr;
+osync_bool is_running_in_rubythread();
 
 GHashTable 		*rubymodule_data;
 
@@ -130,7 +130,6 @@ void rubymodule_ruby_needed();
 
 VALUE rb_funcall2_wrapper ( VALUE* params ) {
     VALUE result;
-    pthread_t this_thread = pthread_self();
     char  *name;
 
     debug_fcall("STACK: %p ", &result);
@@ -151,7 +150,6 @@ VALUE rb_funcall2_wrapper ( VALUE* params ) {
 static VALUE rb_funcall2_protected ( VALUE recv, const char* method, int argc, VALUE* args, int* status ) {
     VALUE params[4];
     VALUE result;
-    int i;
     params[0]= recv;
     params[1]= ( VALUE ) method;
     params[2]= ( VALUE ) argc;
@@ -191,7 +189,6 @@ static void unregister_and_free(gpointer data) {
 
 static void osync_rubymodule_set_data ( void* ptr, char const *key, VALUE data ) {
     GHashTable *ptr_data;
-    VALUE saved_data;
 
     pthread_mutex_lock ( &rubymodule_data_lock );
 
@@ -266,7 +263,6 @@ static VALUE rb_osync_rubymodule_set_data ( int argc, VALUE *argv, VALUE self ) 
     void *ptr = 0;
     char const *key;
     int res1 = 0 ;
-    VALUE vresult = Qnil;
 
     if ( ( argc < 3 ) || ( argc > 3 ) ) {
         rb_raise ( rb_eArgError, "wrong # of arguments(%d for 3)",argc );
@@ -285,9 +281,7 @@ fail:
 
 static VALUE rb_osync_rubymodule_clean_data ( int argc, VALUE *argv, VALUE self ) {
     void *ptr = 0;
-    char const *key;
     int res1 = 0 ;
-    VALUE vresult = Qnil;
 
     if ( ( argc < 1 ) || ( argc > 1 ) ) {
         rb_raise ( rb_eArgError, "wrong # of arguments(%d for 1)",argc );
@@ -303,11 +297,12 @@ fail:
     return Qnil;
 }
 
+/*
 static void free_plugin_data ( VALUE *data ) {
     // I guess gc will free this data
     rb_gc_unregister_address ( data );
     free(data);
-}
+}*/
 
 VALUE rb_load_basefile(const char *filename) {
     return rb_require(RUBY_BASE_FILE);
@@ -443,7 +438,7 @@ VALUE rb_osync_converter_new(int argc, VALUE *argv, VALUE self) {
   OSyncConverterType arg1 ;
   OSyncObjFormat *arg2 = (OSyncObjFormat *) 0 ;
   OSyncObjFormat *arg3 = (OSyncObjFormat *) 0 ;
-  OSyncFormatConvertFunc arg4 = (OSyncFormatConvertFunc) 0 ;
+  /*OSyncFormatConvertFunc arg4 = (OSyncFormatConvertFunc) 0 ;*/
   OSyncError **arg5 = (OSyncError **) 0 ;
   OSyncError *error5 ;
   int val1 ;
@@ -549,7 +544,7 @@ void rubymodule_finalize() {
     RUBY_EPILOGUE
 }
 
-osync_bool is_rubythread() {
+osync_bool is_running_in_rubythread() {
   return ruby_thread == pthread_self();
 }
 

@@ -71,7 +71,8 @@ end
 
 def define_callback(setter, signature, argins, logic)
     (result_type, args, arg_type)=parse_signature(signature)
-
+    has_result    = result_type != "void"
+    has_error     = arg_type.include?("error")
     callback_name = setter.sub(/^osync_(.*)_set_(.*)_func$/,"osync_rubymodule_\\1_\\2")
     rb_setter_name= setter.sub(/^osync_(.*)_func$/,"rb_osync_rubymodule_\\1")
     $ruby_methods[setter]=rb_setter_name
@@ -83,7 +84,7 @@ def define_callback(setter, signature, argins, logic)
 EOF
     define_rubycall callback_name, signature, argins, <<EOF
     VALUE callback = osync_rubymodule_get_data (#{argins.first}, "#{setter}" );
-    VALUE ruby_result = rb_funcall2_protected ( callback, "call", #{argins.size}, ruby_args, &ruby_error );
+    #{has_result ? "VALUE ruby_result = " : "/* no result */" } rb_funcall2_protected ( callback, "call", #{argins.size}, ruby_args, &ruby_error );
     if ( ruby_error!=0 ) {
 	osync_rubymodule_error_set( error, OSYNC_ERROR_GENERIC, "Failed to call #{callback_name} function!");
         goto error;
@@ -172,7 +173,7 @@ exit:
 VALUE #{func_name}_load_and_run_protected(VALUE _unused) {
     osync_trace ( TRACE_ENTRY, "%s()", __func__);
     #{has_result ? "#{result_type} result = (#{result_type})0;" : "/* no result */" }
-    #{result_type}* result_ptr = (#{result_type}*)0;
+    #{has_result ? "#{result_type}* result_ptr = (#{result_type}*)0;":"/* no result */"}
     void* *args = funcall_data.args;
     /* loading args */
 #{
@@ -182,8 +183,7 @@ VALUE #{func_name}_load_and_run_protected(VALUE _unused) {
     }
     code.join("\n")
 }
-    #{has_result ? "result =" : ""} #{func_name}_run(#{args.collect{|(type,name)| name}.join(", ")});
-        /* exiting */
+    #{has_result ? "result =" : ""}#{func_name}_run(#{args.collect{|(type,name)| name}.join(", ")});
     #{has_result ? "result_ptr = malloc(sizeof(#{result_type}*));": ""}
     #{has_result ? "*result_ptr = result;" : ""}
     #{has_result ? "funcall_data.result = result_ptr;": ""}
@@ -193,16 +193,17 @@ VALUE #{func_name}_load_and_run_protected(VALUE _unused) {
 
 void #{func_name}_load_and_run() {
     int ruby_error = 0;
-    #{has_error ? "" : "OSyncError *local_error; OSyncError **error = &local_error;" }
     osync_trace ( TRACE_ENTRY, "%s()", __func__);
+#{if has_error
+    error_i = args.size-1
+"
+    /* Loading error */
     void* *args = funcall_data.args;
-    /* loading args */
-#{
-    code=[]
-    args.each_index {|i|
-       code<<"    #{args[i][0]} #{args[i][1]} = *((#{args[i][0]}*)args[#{i}]);"
-    }
-    code.join("\n")
+    OSyncError **error = *((#{args[error_i][0]}*)args[#{error_i}]);
+"
+else
+    "OSyncError *local_error; OSyncError **error = &local_error;"
+end
 }
     rb_protect(#{func_name}_load_and_run_protected, Qnil, &ruby_error);
     if ( ruby_error!=0 ) {
@@ -270,7 +271,7 @@ exit:
     /* init ruby, if needed */
     rubymodule_ruby_needed();
 
-    if (is_rubythread()) {
+    if (is_running_in_rubythread()) {
       debug_thread("Called from ruby thread. No need to worry with locks.\\n");
       /* If we are running inside the rubythread, there is no need to worry. We are aready protected*/
       #{has_result ? "result =" : ""} #{func_name}_run(#{args.collect{|(type,name)| name}.join(", ")});
@@ -278,7 +279,6 @@ exit:
       debug_thread("Called from outside rubythread. Pass to ruby thread.\\n");
       #{has_result ? "result =" : ""} #{func_name}_save_and_request(#{args.collect{|(type,name)| name}.join(", ")});
     }
-exit:
     #{has_result ? "return result;" : "return;" }
 }
 EOF
@@ -289,9 +289,8 @@ end
 define_rubycall  "get_sync_info",
 		"osync_bool ( OSyncPluginEnv *env, OSyncError **error )",
 		%w{env}, <<'EOF'
-    int status;
-    VALUE ruby_result = rb_protect (rb_get_sync_info, ruby_args[0], &status );
-    if ( status!=0 ) {
+    VALUE ruby_result = rb_protect (rb_get_sync_info, ruby_args[0], &ruby_error );
+    if ( ruby_error!=0 ) {
 	osync_rubymodule_error_set(error, OSYNC_ERROR_GENERIC, "Failed to call rb_get_sync_info!");
         goto error;
     }
@@ -304,9 +303,8 @@ EOF
 define_rubycall  "get_format_info",
 		"osync_bool ( OSyncFormatEnv *env, OSyncError **error )",
 		%w{env}, <<'EOF'
-    int status;
-    VALUE ruby_result = rb_protect (rb_get_format_info, ruby_args[0], &status );
-    if ( status!=0 ) {
+    VALUE ruby_result = rb_protect (rb_get_format_info, ruby_args[0], &ruby_error );
+    if ( ruby_error!=0 ) {
 	osync_rubymodule_error_set(error, OSYNC_ERROR_GENERIC, "Failed to call rb_get_format_info!");
         goto error;
     }
@@ -319,9 +317,8 @@ EOF
 define_rubycall  "get_conversion_info",
 		"osync_bool ( OSyncFormatEnv *env, OSyncError **error )",
 		%w{env}, <<'EOF'
-    int status;
-    VALUE ruby_result = rb_protect (rb_get_conversion_info, ruby_args[0], &status );
-    if ( status!=0 ) {
+    VALUE ruby_result = rb_protect (rb_get_conversion_info, ruby_args[0], &ruby_error );
+    if ( ruby_error!=0 ) {
         osync_rubymodule_error_set(error, OSYNC_ERROR_GENERIC, "Failed to call rb_get_conversion_info!");
         goto error;
     }
@@ -380,7 +377,7 @@ define_callback "osync_objformat_set_finalize_func",
         rb_gc_unregister_address(user_data);
 	free(user_data);
     }
-    result = TRUE;
+    result = RBOOL ( ruby_result );
 EOF
 
 # typedef OSyncConvCmpResult (* OSyncFormatCompareFunc) (OSyncObjFormat *format, const char *leftdata, unsigned int leftsize, const char *rightdata, unsigned int rightsize, void *user_data, OSyncError **error);
