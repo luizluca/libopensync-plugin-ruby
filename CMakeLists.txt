@@ -1,4 +1,4 @@
-PROJECT( libopensync-plugin-ruby C )
+PROJECT( ruby-module C )
 
 SET( VERSION "0.40" )
 

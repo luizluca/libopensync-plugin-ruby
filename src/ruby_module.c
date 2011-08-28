@@ -73,9 +73,9 @@ extern void *STACK_END_ADDRESS;
 /* Converts to string */
 #define STR(args...)	#args
 
-// #define DEBUG_MUTEX
-// #define DEBUG_THREAD
-// #define DEBUG_FCALL
+/* #define DEBUG_MUTEX */
+/* #define DEBUG_THREAD */
+/* #define DEBUG_FCALL */
 
 #ifdef DEBUG_MUTEX
 #define pthread_mutex_lock(mutex) fprintf(stderr, "DEBUG_MUTEX[%lu]: Locking " #mutex " at %s:%i\n",pthread_self(),__func__,__LINE__);pthread_mutex_lock(mutex);fprintf(stderr, "DEBUG_MUTEX[%lu]: Locked " #mutex " at %s:%i\n",pthread_self(),__func__,__LINE__);
