@@ -138,6 +138,16 @@
     rb_ary_push(array, SWIG_NewPointerObj(SWIG_as_voidptr(item->data), SWIGTYPE_p_OSyncObjFormatSink, 0 |  0 ));
 #elif defined(osync_objtype_sink_get_objformat_sinks)
     rb_ary_push(array, SWIG_NewPointerObj(SWIG_as_voidptr(item->data), SWIGTYPE_p_OSyncObjFormatSink, 0 |  0 ));
+#elif defined(osync_converter_path_get_edges)
+    rb_ary_push(array, SWIG_NewPointerObj(SWIG_as_voidptr(item->data), SWIGTYPE_p_OSyncFormatConverter, 0 |  0 ));
+#elif defined(osync_format_env_get_objformats)
+    rb_ary_push(array, SWIG_NewPointerObj(SWIG_as_voidptr(item->data), SWIGTYPE_p_OSyncObjFormat, 0 |  0 ));
+#elif defined(osync_format_env_find_converters)
+    rb_ary_push(array, SWIG_NewPointerObj(SWIG_as_voidptr(item->data), SWIGTYPE_p_OSyncFormatConverter, 0 |  0 ));
+#elif defined(osync_format_env_find_caps_converters)
+    rb_ary_push(array, SWIG_NewPointerObj(SWIG_as_voidptr(item->data), SWIGTYPE_p_OSyncCapsConverter, 0 |  0 ));
+#elif defined(osync_format_env_get_converters)
+    rb_ary_push(array, SWIG_NewPointerObj(SWIG_as_voidptr(item->data), SWIGTYPE_p_OSyncFormatConverter, 0 |  0 ));
 #elif defined(osync_hashtable_get_deleted)
     rb_ary_push(array, SWIG_FromCharPtr(SWIG_as_voidptr(item->data)));
 #else
