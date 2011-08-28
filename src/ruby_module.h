@@ -39,7 +39,7 @@
 #include <ruby.h>
 
 #define RUBY_SCRIPTNAME   "ruby-module"
-#define RUBY_BASE_FILE 	  "opensync.rb"
+#define RUBY_BASE_FILE 	  OPENSYNC_RUBYLIB_DIR "/" "opensync.rb"
 #define RUBY_PLUGIN_CLASS "Opensync::MetaPlugin"
 #define RUBY_FORMAT_CLASS "Opensync::MetaFormat"
 

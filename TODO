@@ -1,0 +1,9 @@
+- Add missing callbacks to gencallbacks.rb in order to have full library API (and not only plugin/format API)
+   OSYNC_EXPORT void osync_context_set_callback(OSyncContext *context, OSyncContextCallbackFn callback, void *userdata);
+   OSYNC_EXPORT void osync_context_set_changes_callback(OSyncContext *context, OSyncContextChangeFn changes);
+   OSYNC_EXPORT void osync_context_set_slowsync_callback(OSyncContext *context, OSyncContextSlowSyncFn slowsync_func, void *userdata);
+   OSYNC_EXPORT void osync_context_set_warning_callback(OSyncContext *context, OSyncContextCallbackFn warning);
+
+- Verify the unallocation of objects when the do so
+- Add ruby-file-sync to the installed dir
+- Add test similar to what file-sync have (using ruby-file-sync)

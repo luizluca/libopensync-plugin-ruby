@@ -22,7 +22,7 @@ require "thread"
 require "set"
 require "pathname"
 
-GC.disable
+#GC.disable
 #$stderr.puts GC.count
 #GC.stress=true
 
@@ -593,7 +593,6 @@ if $trace
     when "call", "c-call"
 	type=Opensync::TRACE_ENTRY
         args=binding.eval("local_variables.collect {|var| var }.collect{|var| eval(var.to_s)}")
-# 	args=["???"]
 	id_s=id.to_s
 	case
 	when (id_s[-1,1] == "=" and args.size==1)
