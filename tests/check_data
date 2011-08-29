@@ -26,16 +26,16 @@ cat <<EOF
 EOF
 ) > $TMPCFG
 
-osyncplugin --plugin file-sync --pluginpath $PLUGINPATH --config $TMPCFG --configdir $TMPDIR --initialize --connect --sync --syncdone --disconnect --finalize || exit 1
+osyncplugin --plugin ruby-file-sync --pluginpath $PLUGINPATH --config $TMPCFG --configdir $TMPDIR --initialize --connect --sync --syncdone --disconnect --finalize || exit 1
 touch $TMPDIR/data/foo2
 
-osyncplugin --plugin file-sync --pluginpath $PLUGINPATH --config $TMPCFG --configdir $TMPDIR --initialize --connect --sync --syncdone --disconnect --finalize || exit 1
+osyncplugin --plugin ruby-file-sync --pluginpath $PLUGINPATH --config $TMPCFG --configdir $TMPDIR --initialize --connect --sync --syncdone --disconnect --finalize || exit 1
 date +%s > $TMPDIR/data/foo2
 
-osyncplugin --plugin file-sync --pluginpath $PLUGINPATH --config $TMPCFG --configdir $TMPDIR --initialize --connect --sync --syncdone --disconnect --finalize || exit 1
+osyncplugin --plugin ruby-file-sync --pluginpath $PLUGINPATH --config $TMPCFG --configdir $TMPDIR --initialize --connect --sync --syncdone --disconnect --finalize || exit 1
 rm $TMPDIR/data/foo1
 
-osyncplugin --plugin file-sync --pluginpath $PLUGINPATH --config $TMPCFG --configdir $TMPDIR --initialize --connect --sync --syncdone --disconnect --finalize || exit 1
+osyncplugin --plugin ruby-file-sync --pluginpath $PLUGINPATH --config $TMPCFG --configdir $TMPDIR --initialize --connect --sync --syncdone --disconnect --finalize || exit 1
 
 (
 cat <<EOF
@@ -52,4 +52,4 @@ cat <<EOF
 EOF
 ) > $TMPCFG
 
-osyncplugin --plugin file-sync --pluginpath $PLUGINPATH --config $TMPCFG --configdir $TMPDIR --initialize --connect --sync --syncdone --disconnect --finalize || exit 1
+osyncplugin --plugin ruby-file-sync --pluginpath $PLUGINPATH --config $TMPCFG --configdir $TMPDIR --initialize --connect --sync --syncdone --disconnect --finalize || exit 1

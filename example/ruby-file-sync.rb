@@ -543,6 +543,6 @@ end
 Opensync::MetaPlugin.register(RubyFileSync)
 Opensync::MetaFormat.register(FileFormat)
 Opensync::MetaFormat.register(PlainFormat)
-Opensync::MetaFormat.register(FilePlainConverter)
+Opensync::MetaConverter.register(FilePlainConverter)
 
 # $trace=false

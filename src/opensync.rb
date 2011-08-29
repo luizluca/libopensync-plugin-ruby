@@ -59,7 +59,7 @@ module Opensync
 	    pathname.each_entry do
 		|entry|
 		next if not entry.extname == ".rb"
-		#$stderr.puts "Reading file #{entry}"
+# 		$stderr.puts "Reading file #{entry}"
 		entry=pathname + entry
 		@@current_file=entry
 		require "#{entry}"
@@ -76,60 +76,55 @@ module Opensync
 	    #$stderr.puts "Registered #{obj} in #{@@current_file}"
 	    true
 	end
-    end
 
-    # This is not really a plugin but someone that ruby-module calls to run get_sync_info
-    class MetaPlugin <MetaModule
-        def self.get_sync_info(_env)
-	    env=Plugin::Env.from(_env)
-	    if ENV2.include?('OPENSYNC_RUBYPLUGIN_DIR')
-		pathname=Pathname.new(ENV2["OPENSYNC_RUBYPLUGIN_DIR"]).expand_path
+	def self.get_info(method, _env, env)
+	    if ENV2.include?(self::ENV_DIR_NAME)
+		pathname=Pathname.new(ENV2[self::ENV_DIR_NAME]).expand_path
 	    else
-		pathname=Pathname.new(Opensync::OPENSYNC_RUBYPLUGIN_DIR)
+		pathname=Pathname.new(self::DEFAULT_DIR)
 	    end
 	    load_files(pathname) do
 		|obj|
-		#$stderr.puts "Calling #{obj}"
+# 		$stderr.puts "Calling #{obj}"
 		if obj.kind_of? OSyncObject or (obj.kind_of? Class and obj.ancestors.include?(OSyncObject))
-		    obj.get_sync_info(env)
+		    obj.send(method,env)
 		else
-		    obj.get_sync_info(_env)
+		    obj.send(method,env)
 		end
 		#$stderr.puts "Done #{obj}"
 	    end
 	    true
+	end
+    end
+
+    # This is not really a plugin but someone that ruby-module calls to run get_sync_info
+    class MetaPlugin <MetaModule
+	ENV_DIR_NAME = "OPENSYNC_RUBY_PLUGINDIR"
+	DEFAULT_DIR  = Opensync::OPENSYNC_RUBY_PLUGINDIR
+        def self.get_sync_info(_env)
+	    get_info(:get_sync_info, _env, Plugin::Env.from(_env))
         end
     end
 
-
     # This is not really a format but someone that ruby-module calls to run get_format_info and get_conversion_info
     class MetaFormat < MetaModule
-	def self.get_xxx_info(_env, method, ignored)
-	    env=Format::Env.from(_env)
-	    if ENV2.include?('OPENSYNC_RUBYFORMATS_DIR')
-		pathname=Pathname.new(ENV2["OPENSYNC_RUBYFORMATS_DIR"]).expand_path
-	    else
-		pathname=Pathname.new(Opensync::OPENSYNC_RUBYFORMATS_DIR)
-	    end
-	    load_files(pathname) do
-		|obj|
-		# Silently ignore if the obj responds to ignored method but not method
-		next if not obj.respond_to? method and obj.respond_to? ignored
-		if obj.kind_of? OSyncObject or (obj.kind_of? Class and obj.ancestors.include?(OSyncObject))
-		    obj.send(method,env)
-		else
-		    obj.send(method,_env)
-		end
-	    end
-	    true
-        end
+	ENV_DIR_NAME = "OPENSYNC_RUBY_FORMATSDIR"
+	DEFAULT_DIR  = Opensync::OPENSYNC_RUBY_FORMATSDIR
 
 	def self.get_format_info(_env)
-	    self.get_xxx_info(_env, :get_format_info, :get_conversion_info)
+	    self.get_info(:get_format_info, _env, Format::Env.from(_env))
 	end
 
 	def self.get_conversion_info(_env)
-	    self.get_xxx_info(_env, :get_conversion_info, :get_format_info)
+	    MetaConverter.get_conversion_info(_env)
+	end
+    end
+    class MetaConverter < MetaModule
+	ENV_DIR_NAME = "OPENSYNC_RUBY_FORMATSDIR"
+	DEFAULT_DIR  = Opensync::OPENSYNC_RUBY_FORMATSDIR
+
+	def self.get_conversion_info(_env)
+	    self.get_info(:get_conversion_info, _env, Format::Env.from(_env))
 	end
     end
 

@@ -169,15 +169,15 @@ static char * osync_rubymodule_error_bt ( ) {
     int state;
 
     const char *rb_error_code =
-    "bt=$!.backtrace;"
-    "bt << \"C-code:???\" if bt.empty?; "
-    "$stderr.puts 1,bt.size;"
-    "bt[0]=\"#{bt[0]}: #{$!} (#{$!.class})\";"
-    "bt.join('\n        from ');";
+      "bt=$!.backtrace;"
+      "bt << \"C-code:???\" if bt.empty?; "
+      "bt[0]=\"#{bt[0]}: #{$!} (#{$!.class}) if $!\";"
+      "bt.join('\n        from ');";
 
     message = rb_protect ( ( VALUE ( * ) ( VALUE ) ) rb_eval_string, ( VALUE )rb_error_code, &state );
     if ( state!=0 ) {
-        return "Unable to obtain BT!";
+	fprintf(stderr,"Unable to obtain backtrace from ruby! RubyError: %d\n", state);
+        return "Unable to obtain backtrace from ruby!";
     }
     return RSTRING_PTR ( message );
 }
@@ -216,21 +216,15 @@ static VALUE osync_rubymodule_get_data ( void* ptr, char const *key ) {
     GHashTable *ptr_data;
     VALUE      *saved_data;
 
-//     fprintf(stderr, "%p[\"%s\"@%p]-> ", ptr, key, &key);
-
     ptr_data = ( GHashTable* ) g_hash_table_lookup ( rubymodule_data, ptr );
     if ( ptr_data == NULL ) {
-// 	fprintf(stderr, "no values\n");
         return Qnil;
     }
 
     saved_data = ( VALUE* ) g_hash_table_lookup ( ptr_data, key );
     if ( !saved_data ) {
-// 	fprintf(stderr, "%s not found\n", key);
         return Qnil;
     }
-
-//     fprintf(stderr, "%lu\n", ptr, key, saved_data);
     return *saved_data;
 }
 
@@ -531,8 +525,9 @@ void rubymodule_initialize() {
     // Converter new/set_callback implementation
     rb_define_module_function ( mOpensync, "osync_converter_new", rb_osync_converter_new, -1 );
     // Some constants exposed to RUBY
-    rb_define_const(mOpensync, "OPENSYNC_RUBYPLUGIN_DIR", SWIG_FromCharPtr (OPENSYNC_RUBYPLUGIN_DIR));
-    rb_define_const(mOpensync, "OPENSYNC_RUBYFORMATS_DIR", SWIG_FromCharPtr (OPENSYNC_RUBYFORMATS_DIR));
+    rb_define_const(mOpensync, "OPENSYNC_RUBY_PLUGINDIR", SWIG_FromCharPtr (OPENSYNC_RUBY_PLUGINDIR));
+    rb_define_const(mOpensync, "OPENSYNC_RUBY_FORMATSDIR", SWIG_FromCharPtr (OPENSYNC_RUBY_FORMATSDIR));
+    rb_define_const(mOpensync, "OPENSYNC_RUBYLIB_DIR", SWIG_FromCharPtr (OPENSYNC_RUBYLIB_DIR));
     // Initialize hash that maps objects to its properties (which include callbacks blocks)
     rubymodule_data = g_hash_table_new_full ( g_direct_hash, g_direct_equal, NULL, ( GDestroyNotify ) g_hash_table_destroy );
 }
@@ -552,7 +547,7 @@ void *rubymodule_ruby_thread(void *threadid) {
     debug_thread("Thread launched!\n");
     pthread_mutex_lock ( &ruby_context_lock);
     int page = sysconf(_SC_PAGE_SIZE);
-    mprotect((void *)((unsigned long)&STACK_END_ADDRESS & ~(page - 1)), page, PROT_READ | PROT_WRITE | PROT_EXEC);
+    mprotect((void *)((unsigned long)&STACK_END_ADDRESS & ~(page-1)), page, PROT_READ | PROT_WRITE | PROT_EXEC);
     RUBY_PROLOGUE
     RUBY_INIT_STACK;
     ruby_init();
@@ -580,10 +575,10 @@ void *rubymodule_ruby_thread(void *threadid) {
 }
 
 void rubymodule_ruby_needed() {
-    if (ruby_started )
+    if (ruby_started)
 	return;
     pthread_mutex_lock ( &ruby_context_lock);
-    if (! ruby_started ) {
+    if (!ruby_started) {
        int rc;
        pthread_attr_t attr;
        pthread_attr_init(&attr);

@@ -7,3 +7,6 @@
 - Verify the unallocation of objects when the do so
 - Add ruby-file-sync to the installed dir
 - Add test similar to what file-sync have (using ruby-file-sync)
+- Check how python wrapper installs with binary-meta. We need to install into root_dir
+- Add documentation for each function
+- BUG: opensync.rb is being installed outside libopensync
