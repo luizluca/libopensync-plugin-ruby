@@ -7,3 +7,4 @@
 - Verify the unallocation of objects when the do so
 - Add test similar to what file-sync have (using ruby-file-sync). Test does not work if installed. It loads both the previous module and the new one
 - Add documentation for each function
+- check header GPL

@@ -286,7 +286,7 @@ end
 
 
 
-define_rubycall  "get_sync_info",
+define_rubycall  "rubymodule_get_sync_info",
 		"osync_bool ( OSyncPluginEnv *env, OSyncError **error )",
 		%w{env}, <<'EOF'
     VALUE ruby_result = rb_protect (rb_get_sync_info, ruby_args[0], &ruby_error );
@@ -300,7 +300,7 @@ define_rubycall  "get_sync_info",
     result = TRUE;
 EOF
 
-define_rubycall  "get_format_info",
+define_rubycall  "rubymodule_get_format_info",
 		"osync_bool ( OSyncFormatEnv *env, OSyncError **error )",
 		%w{env}, <<'EOF'
     VALUE ruby_result = rb_protect (rb_get_format_info, ruby_args[0], &ruby_error );
@@ -314,7 +314,7 @@ define_rubycall  "get_format_info",
     result = TRUE;
 EOF
 
-define_rubycall  "get_conversion_info",
+define_rubycall  "rubymodule_get_conversion_info",
 		"osync_bool ( OSyncFormatEnv *env, OSyncError **error )",
 		%w{env}, <<'EOF'
     VALUE ruby_result = rb_protect (rb_get_conversion_info, ruby_args[0], &ruby_error );

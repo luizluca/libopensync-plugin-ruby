@@ -32,15 +32,26 @@ SET_TARGET_PROPERTIES(${SWIG_MODULE_opensync-swig_REAL_NAME} PROPERTIES SUFFIX "
 # Include SWIG in include in order to compile it with ruby_module
 INCLUDE_DIRECTORIES( ${swig_outdir} )
 
-OPENSYNC_PLUGIN_ADD( ruby-module ruby_module.c opensync.i ${CMAKE_CURRENT_BINARY_DIR}/callbacks.h)
+ADD_LIBRARY( opensync-ruby SHARED ruby_module.c opensync.i ${CMAKE_CURRENT_BINARY_DIR}/callbacks.h )
+TARGET_LINK_LIBRARIES( opensync-ruby  ${OPENSYNC_LIBRARIES} ${GLIB2_LIBRARIES} ${LIBXML2_LIBRARIES} ${RUBY_LIBRARY})
+# TODO fix versions
+SET_TARGET_PROPERTIES( opensync-ruby  PROPERTIES VERSION ${VERSION} )
+SET_TARGET_PROPERTIES( opensync-ruby  PROPERTIES SOVERSION ${VERSION} )
 
-TARGET_LINK_LIBRARIES( ruby-module ${OPENSYNC_LIBRARIES} ${GLIB2_LIBRARIES} ${LIBXML2_LIBRARIES} ${RUBY_LIBRARY})
+OPENSYNC_PLUGIN_ADD( ruby-plugin ruby_plugin.c ruby_module.h)
+TARGET_LINK_LIBRARIES( ruby-plugin ${OPENSYNC_LIBRARIES} ${GLIB2_LIBRARIES} ${LIBXML2_LIBRARIES} ${RUBY_LIBRARY} opensync-ruby)
+
+OPENSYNC_FORMAT_ADD( ruby-format ruby_format.c ruby_module.h)
+TARGET_LINK_LIBRARIES( ruby-plugin ${OPENSYNC_LIBRARIES} ${GLIB2_LIBRARIES} ${LIBXML2_LIBRARIES} ${RUBY_LIBRARY} opensync-ruby)
+
 
 ###### INSTALL ###################
-OPENSYNC_PLUGIN_INSTALL( ruby-module )
-# BUG how to install as symblink only?
-OPENSYNC_FORMAT_INSTALL( ruby-module )
-OPENSYNC_PLUGIN_CONFIG( ruby-module )
+INSTALL( TARGETS opensync-ruby DESTINATION ${LIB_INSTALL_DIR} )
+
+OPENSYNC_PLUGIN_INSTALL( ruby-plugin )
+OPENSYNC_PLUGIN_CONFIG( ruby-plugin )
+
+OPENSYNC_FORMAT_INSTALL( ruby-format )
 
 #this will install in RUBYLIB
 #INSTALL( FILES opensync.rb DESTINATION ${RUBY_RUBY_LIB_DIR} )

@@ -1,1 +1,6 @@
 This is an opensync plugin wrapper in order to allow plugins and formats to be developed in ruby
+
+
+- Isolated the library in order to have only one ruby env
+
+

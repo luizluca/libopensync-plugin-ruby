@@ -1,6 +1,6 @@
 /*
- * file-sync - A plugin for the opensync framework
- * Copyright (C) 2004-2005  Armin Bauer <armin.bauer@opensync.org>
+ * ruby_module - Ruby bidings for the opensync framework
+ * Copyright (C) 2011  Luiz Angelo Daros de Luca <luizluca@gmail.com>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public

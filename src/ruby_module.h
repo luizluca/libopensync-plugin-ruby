@@ -1,6 +1,6 @@
 /*
- * file-sync - A plugin for the opensync framework
- * Copyright (C) 2004-2005  Armin Bauer <armin.bauer@opensync.org>
+ * ruby_module - Ruby bidings for the opensync framework
+ * Copyright (C) 2011  Luiz Angelo Daros de Luca <luizluca@gmail.com>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -43,5 +43,10 @@
 // #define RUBY_BASE_FILE 	  "~/prog/opensync/binary-meta/sources/ruby-module/src/opensync.rb"
 #define RUBY_PLUGIN_CLASS "Opensync::MetaPlugin"
 #define RUBY_FORMAT_CLASS "Opensync::MetaFormat"
+
+osync_bool rubymodule_get_sync_info(OSyncPluginEnv* env, OSyncError** error) ;
+osync_bool rubymodule_get_format_info(OSyncFormatEnv* env, OSyncError** error);
+osync_bool rubymodule_get_conversion_info(OSyncFormatEnv* env, OSyncError** error);
+
 
 #endif //_RUBY_PLUGIN_H
