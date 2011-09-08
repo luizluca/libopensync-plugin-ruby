@@ -83,8 +83,8 @@ def define_callback(setter, signature, argins, logic)
 /* This method is the callback wrapper defined by #{setter} inside ruby */
 EOF
     define_rubycall callback_name, signature, argins, <<EOF
-    VALUE callback = osync_rubymodule_get_data (#{argins.first}, "#{setter}" );
-    #{has_result ? "VALUE ruby_result = " : "/* no result */" } rb_funcall2_protected ( callback, "call", #{argins.size}, ruby_args, &ruby_error );
+    VALUE _callback = osync_rubymodule_get_data (#{argins.first}, "#{setter}" );
+    #{has_result ? "VALUE ruby_result = " : "/* no result */" } rb_funcall2_protected ( _callback, "call", #{argins.size}, ruby_args, &ruby_error );
     if ( ruby_error!=0 ) {
 	osync_rubymodule_error_set( error, OSYNC_ERROR_GENERIC, "Failed to call #{callback_name} function!");
         goto error;
@@ -573,5 +573,50 @@ define_rubycall "osync_rubymodule_converter_convert",
     *free_input  = RBOOL ( rb_ary_entry ( ruby_result, 1 ) );
     result = TRUE;
 EOF
+
+#typedef void * (* OSyncFormatConverterInitializeFunc) ;
+define_callback "osync_converter_set_initialize_func",
+		"void* (OSyncFormatConverter *converter, const char *config, OSyncError **error)",
+		%w{converter config}, <<'EOF'
+    VALUE *puser_data = malloc(sizeof(VALUE));
+    *puser_data = ruby_result;
+    rb_gc_register_address(puser_data);
+    result = puser_data;
+EOF
+
+#typedef osync_bool (* OSyncFormatConverterFinalizeFunc) (OSyncFormatConverter *converter, void *userdata, OSyncError **error);
+define_callback "osync_converter_set_finalize_func",
+		"osync_bool (OSyncFormatConverter *converter, void *userdata, OSyncError **error)",
+		%w{converter userdata}, <<'EOF'
+    if (userdata) {
+        rb_gc_unregister_address(userdata);
+	free(userdata);
+    }
+    result = RBOOL ( ruby_result );
+EOF
+
+
+# typedef void (* OSyncContextCallbackFn)(OSyncContext *context, void *, OSyncError *);
+# BUG: Not generating as rb_osync_context_set_callback
+# define_callback "osync_context_set_callback",
+# 		"void (OSyncContext *context, OSyncContextCallbackFn callback, void *userdata)",
+# 		%w{context callback userdata}, <<'EOF'
+# EOF
+# define_callback "osync_context_set_warning_callback",
+# 		"void (OSyncContext *context, OSyncContextCallbackFn callback, void *userdata)",
+# 		%w{context callback userdata}, <<'EOF'
+# EOF
+#
+# # typedef void (* OSyncContextChangeFn) (OSyncContext *context, OSyncChange *, void *);
+# define_callback "osync_context_set_changes_callback",
+# 		"void (OSyncContext *context, OSyncContextChangeFn changes)",
+# 		%w{context changes}, <<'EOF'
+# EOF
+#
+# # typedef void (* OSyncContextSlowSyncFn) (OSyncContext *context, void *);
+# define_callback "osync_context_set_slowsync_callback",
+# 		"void (OSyncContext *context, OSyncContextSlowSyncFn slowsync_func, void *userdata)",
+# 		%w{context slowsync_func userdata}, <<'EOF'
+# EOF
 
 define_Init_rubymodule_callbacks
